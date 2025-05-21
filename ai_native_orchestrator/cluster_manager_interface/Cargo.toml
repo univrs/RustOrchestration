@@ -8,3 +8,4 @@ orchestrator_shared_types = { path = "../orchestrator_shared_types" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+downcast-rs = { workspace = true }

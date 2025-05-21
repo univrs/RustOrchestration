@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use orchestrator_shared_types::{Node, NodeId, OrchestrationError, Result};
-use std::sync::Arc; // For sharing state if needed
-use tokio::sync::watch; // For broadcasting cluster changes
+//use std::sync::Arc; // For sharing state if needed
+use tokio::sync::watch; // For broadcasting cluster changes 
+use downcast_rs::{impl_downcast, DowncastSync}; // For downcasting trait objects if needed 
 
 /// Represents an event related to cluster membership or node status.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +13,7 @@ pub enum ClusterEvent {
 }
 
 #[async_trait]
-pub trait ClusterManager: Send + Sync {
+pub trait ClusterManager: DowncastSync + Send + Sync {
     /// Initializes the cluster manager.
     async fn initialize(&self) -> Result<()>;
 
@@ -32,6 +33,7 @@ pub trait ClusterManager: Send + Sync {
     // Health checking logic would be invoked by this manager.
     // For example, the manager might periodically ping nodes.
 }
+impl_downcast!(ClusterManager); 
 
 // Example of a specific error for this interface
 #[derive(Debug, thiserror::Error)]

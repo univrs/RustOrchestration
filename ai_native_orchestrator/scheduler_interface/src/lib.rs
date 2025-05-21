@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use orchestrator_shared_types::{Node, NodeId, OrchestrationError, Result, WorkloadDefinition, WorkloadInstance};
-use cluster_manager_interface::ClusterManager; // To get node information
+ // To get node information
 use std::sync::Arc;
 
 /// Input for a scheduling decision.

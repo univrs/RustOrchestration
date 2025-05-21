@@ -3,20 +3,23 @@ name = "orchestrator_core"
 version = "0.1.0"
 edition = "2024"
 
-# [[bin]] # Add this section if you have a main.rs
-# name = "orchestrator_daemon"
-# path = "src/main.rs"
-
-
+# This setup is for when main.rs is inside orchestrator_core/src/
+# If orchestrator_core is purely a lib, and main.rs is in a separate bin crate,
+# this [[bin]] section would be in that separate crate's Cargo.toml.
+[[bin]]
+name = "orchestrator_daemon" # Or just "orchestrator_core" if you prefer
+path = "src/main.rs"
 
 [dependencies]
-# ... (existing dependencies)
-anyhow = "1.0" # For easy error handling in main
-uuid = { workspace = true } # For generating UUIDs in main for test
-async-trait = { workspace = true } # For mock impls
-
-# You might need to re-specify these if mocks are in the same crate and not separate
 orchestrator_shared_types = { path = "../orchestrator_shared_types" }
 container_runtime_interface = { path = "../container_runtime_interface" }
 cluster_manager_interface = { path = "../cluster_manager_interface" }
 scheduler_interface = { path = "../scheduler_interface" }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true } # For main.rs
+async-trait = { workspace = true } # For mock impls in main.rs
+anyhow = { workspace = true } # For main.rs
+downcast-rs = { workspace = true } # <--- ADD THIS
