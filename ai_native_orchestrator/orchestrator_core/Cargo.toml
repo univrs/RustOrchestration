@@ -23,4 +23,4 @@ thiserror = { workspace = true }
 uuid = { workspace = true } # For main.rs
 async-trait = { workspace = true } # For mock impls in main.rs
 anyhow = { workspace = true } # For main.rs
-downcast-rs = { workspace = true } # <--- ADD THIS
+downcast-rs = { workspace = true } 
