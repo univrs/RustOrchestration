@@ -1,0 +1,25 @@
+[package]
+name = "orchestrator_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Local dependencies
+orchestrator_shared_types = { path = "../orchestrator_shared_types" }
+
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+# CLI specific dependencies
+clap = { version = "4.4", features = ["derive", "cargo"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde_yaml = "0.9"
+tabled = "0.15"
+colored = "2.1"
+
+[[bin]]
+name = "orchestrator-cli"
+path = "src/main.rs"

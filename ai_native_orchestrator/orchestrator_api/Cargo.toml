@@ -1,0 +1,31 @@
+[package]
+name = "orchestrator_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Local dependencies
+orchestrator_core = { path = "../orchestrator_core" }
+orchestrator_shared_types = { path = "../orchestrator_shared_types" }
+
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+# API server specific dependencies
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+
+[lib]
+name = "orchestrator_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "orchestrator-api"
+path = "src/main.rs"
