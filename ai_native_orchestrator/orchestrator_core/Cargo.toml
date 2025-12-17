@@ -30,6 +30,21 @@ container_runtime = { path = "../container_runtime", optional = true }
 # Optional observability
 observability = { path = "../observability", optional = true }
 
+# Optional REST API
+user_config = { path = "../user_config", optional = true }
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["trace", "cors"], optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+http = { version = "1.0", optional = true }
+http-body-util = { version = "0.1", optional = true }
+bytes = { version = "1.5", optional = true }
+ed25519-dalek = { version = "2.1", features = ["rand_core"], optional = true }
+hex = { version = "0.4", optional = true }
+serde_json = { workspace = true, optional = true }
+
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -45,9 +60,21 @@ default = []
 cluster = ["cluster_manager/chitchat-cluster", "cluster_manager"]
 runtime = ["container_runtime/mock-runtime", "container_runtime"]
 observability = ["dep:observability"]
-full = ["cluster", "runtime", "observability"]
+rest-api = ["user_config", "axum", "tower", "tower-http", "sha2", "base64", "chrono", "http", "http-body-util", "bytes", "ed25519-dalek", "hex", "serde_json"]
+full = ["cluster", "runtime", "observability", "rest-api"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 uuid = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter"] } 
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
+user_config = { path = "../user_config" }
+axum = "0.7"
+rand = "0.8"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = { workspace = true } 

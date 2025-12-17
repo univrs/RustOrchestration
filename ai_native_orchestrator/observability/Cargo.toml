@@ -27,13 +27,20 @@ metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 
 # HTTP server for health endpoints
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# WebSocket support
+tokio-tungstenite = "0.26"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# UUID for client IDs
+uuid = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

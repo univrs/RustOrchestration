@@ -1,6 +1,17 @@
 //! HTTP server for observability endpoints.
 //!
-//! Provides health, readiness, and metrics endpoints via axum.
+//! Provides health, readiness, metrics, and WebSocket event streaming via axum.
+//!
+//! # Endpoints
+//!
+//! - `GET /health` - Health check
+//! - `GET /healthz` - Kubernetes-style health check
+//! - `GET /ready` - Readiness probe
+//! - `GET /readyz` - Kubernetes-style readiness
+//! - `GET /live` - Liveness probe
+//! - `GET /livez` - Kubernetes-style liveness
+//! - `GET /metrics` - Prometheus metrics
+//! - `GET /api/v1/events` - WebSocket event streaming
 
 use axum::{
     extract::State,
@@ -15,8 +26,10 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::health::{HealthChecker, AggregatedHealth};
+use crate::events::EventHub;
+use crate::health::{AggregatedHealth, HealthChecker};
 use crate::metrics::MetricsRegistry;
+use crate::websocket::events_handler;
 
 /// Configuration for the observability server.
 #[derive(Debug, Clone)]
@@ -62,6 +75,7 @@ impl ObservabilityConfig {
 pub struct ObservabilityState {
     health_checker: HealthChecker,
     metrics_registry: Arc<RwLock<Option<MetricsRegistry>>>,
+    event_hub: EventHub,
 }
 
 impl ObservabilityState {
@@ -70,6 +84,16 @@ impl ObservabilityState {
         Self {
             health_checker,
             metrics_registry: Arc::new(RwLock::new(None)),
+            event_hub: EventHub::default(),
+        }
+    }
+
+    /// Create new state with a health checker and event hub.
+    pub fn with_event_hub(health_checker: HealthChecker, event_hub: EventHub) -> Self {
+        Self {
+            health_checker,
+            metrics_registry: Arc::new(RwLock::new(None)),
+            event_hub,
         }
     }
 
@@ -81,6 +105,11 @@ impl ObservabilityState {
     /// Get the health checker.
     pub fn health_checker(&self) -> &HealthChecker {
         &self.health_checker
+    }
+
+    /// Get the event hub.
+    pub fn event_hub(&self) -> &EventHub {
+        &self.event_hub
     }
 }
 
@@ -110,14 +139,34 @@ impl ObservabilityServer {
         self
     }
 
+    /// Set a custom event hub.
+    pub fn with_event_hub(mut self, event_hub: EventHub) -> Self {
+        self.state = ObservabilityState::with_event_hub(
+            self.state.health_checker.clone(),
+            event_hub,
+        );
+        self
+    }
+
     /// Get the shared state for external use.
     pub fn state(&self) -> ObservabilityState {
         self.state.clone()
     }
 
+    /// Get the event hub for broadcasting events.
+    pub fn event_hub(&self) -> &EventHub {
+        self.state.event_hub()
+    }
+
     /// Build the router.
     pub fn router(&self) -> Router {
+        // Create the events API router with EventHub state
+        let events_router = Router::new()
+            .route("/events", get(events_ws_handler))
+            .with_state(self.state.event_hub.clone());
+
         let mut router = Router::new()
+            // Health endpoints
             .route("/health", get(health_handler))
             .route("/healthz", get(health_handler))
             .route("/ready", get(ready_handler))
@@ -125,7 +174,9 @@ impl ObservabilityServer {
             .route("/live", get(live_handler))
             .route("/livez", get(live_handler))
             .route("/metrics", get(metrics_handler))
-            .with_state(self.state.clone());
+            .with_state(self.state.clone())
+            // Nest the API under /api/v1
+            .nest("/api/v1", events_router);
 
         if self.config.enable_cors {
             router = router.layer(CorsLayer::new().allow_origin(Any).allow_methods(Any));
@@ -200,6 +251,16 @@ async fn metrics_handler(State(state): State<ObservabilityState>) -> Response {
             .body("# No metrics registry configured\n".into())
             .unwrap(),
     }
+}
+
+/// WebSocket events endpoint handler.
+///
+/// Accepts WebSocket upgrade requests and delegates to the events handler.
+async fn events_ws_handler(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(event_hub): State<EventHub>,
+) -> impl IntoResponse {
+    events_handler(ws, State(event_hub)).await
 }
 
 /// Convert health status to HTTP status code.

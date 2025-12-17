@@ -1,3 +1,6 @@
+#[cfg(feature = "rest-api")]
+pub mod api;
+
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid;

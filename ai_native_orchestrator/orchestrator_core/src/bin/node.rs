@@ -41,7 +41,7 @@ use state_store_interface::StateStore;
 
 #[cfg(feature = "observability")]
 use observability::{
-    HealthChecker, MetricsRegistry, ObservabilityConfig, ObservabilityServer,
+    EventHub, HealthChecker, MetricsRegistry, ObservabilityConfig, ObservabilityServer,
 };
 
 /// Node configuration parsed from environment.
@@ -350,9 +350,35 @@ async fn main() -> Result<()> {
         let metrics_registry = MetricsRegistry::new();
         let obs_config = ObservabilityConfig::with_port(config.api_port);
 
+        // Create event hub for WebSocket streaming
+        let event_hub = EventHub::default();
+        let event_hub_clone = event_hub.clone();
+
         let obs_server = ObservabilityServer::new(obs_config, health_checker)
+            .with_event_hub(event_hub)
             .with_metrics(metrics_registry)
             .await;
+
+        // Start cluster event forwarder to WebSocket clients
+        let cluster_manager_for_events = cluster_manager.clone();
+        tokio::spawn(async move {
+            if let Ok(mut event_rx) = cluster_manager_for_events.subscribe_to_events().await {
+                info!("Event forwarder started - streaming cluster events to WebSocket clients");
+                loop {
+                    if event_rx.changed().await.is_err() {
+                        warn!("Cluster event channel closed");
+                        break;
+                    }
+
+                    let event = event_rx.borrow_and_update().clone();
+                    if let Some(cluster_event) = event {
+                        event_hub_clone.broadcast_cluster_event(&cluster_event).await;
+                    }
+                }
+            } else {
+                warn!("Failed to subscribe to cluster events for WebSocket streaming");
+            }
+        });
 
         tokio::spawn(async move {
             if let Err(e) = obs_server.serve().await {
@@ -360,7 +386,10 @@ async fn main() -> Result<()> {
             }
         });
 
-        info!(api_port = config.api_port, "Observability server started");
+        info!(
+            api_port = config.api_port,
+            "Observability server started with WebSocket event streaming at /api/v1/events"
+        );
     }
 
     // Print cluster info
