@@ -120,6 +120,14 @@ impl Identity {
         self.signing_key.verifying_key()
     }
 
+    /// Get a clone of the signing key.
+    ///
+    /// # Security
+    /// Handle with care - this is sensitive key material.
+    pub fn signing_key(&self) -> SigningKey {
+        self.signing_key.clone()
+    }
+
     /// Sign a message.
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.signing_key.sign(message)

@@ -12,9 +12,7 @@ members = [
     "mcp_server",
     "observability",
     "user_config",
-    # Future crates:
-        # "cloud_agnostic_layer",
-        # "orchestrator_cli",
+    "ui_cli",
 ]
 
 resolver = "2" # Recommended for new projects
