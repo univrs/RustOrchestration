@@ -1,0 +1,52 @@
+[package]
+name = "observability"
+version = "0.1.0"
+edition = "2021"
+description = "Observability stack for AI-native container orchestration"
+
+[dependencies]
+# Internal crates
+orchestrator_shared_types = { path = "../orchestrator_shared_types" }
+state_store_interface = { path = "../state_store_interface" }
+cluster_manager_interface = { path = "../cluster_manager_interface" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# OpenTelemetry support (optional, disabled for now to avoid OpenSSL dep)
+# tracing-opentelemetry = { version = "0.22", optional = true }
+# opentelemetry = { version = "0.21", optional = true }
+# opentelemetry-otlp = { version = "0.14", optional = true }
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+
+# HTTP server for health endpoints
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = []
+# opentelemetry = ["tracing-opentelemetry", "dep:opentelemetry", "opentelemetry-otlp"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"

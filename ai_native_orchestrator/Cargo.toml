@@ -10,6 +10,7 @@ members = [
     "container_runtime",
     "cluster_manager",
     "mcp_server",
+    "observability",
     # Future crates:
         # "cloud_agnostic_layer",
         # "orchestrator_cli",

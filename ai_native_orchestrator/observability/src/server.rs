@@ -1,0 +1,320 @@
+//! HTTP server for observability endpoints.
+//!
+//! Provides health, readiness, and metrics endpoints via axum.
+
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
+
+use crate::health::{HealthChecker, AggregatedHealth};
+use crate::metrics::MetricsRegistry;
+
+/// Configuration for the observability server.
+#[derive(Debug, Clone)]
+pub struct ObservabilityConfig {
+    /// Address to bind the server to.
+    pub bind_addr: SocketAddr,
+    /// Enable CORS for all origins.
+    pub enable_cors: bool,
+    /// Enable request tracing.
+    pub enable_tracing: bool,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            bind_addr: SocketAddr::from(([0, 0, 0, 0], 9090)),
+            enable_cors: true,
+            enable_tracing: true,
+        }
+    }
+}
+
+impl ObservabilityConfig {
+    /// Create a new config with the specified port.
+    pub fn with_port(port: u16) -> Self {
+        Self {
+            bind_addr: SocketAddr::from(([0, 0, 0, 0], port)),
+            ..Default::default()
+        }
+    }
+
+    /// Create a new config with the specified address.
+    pub fn with_addr(addr: impl Into<SocketAddr>) -> Self {
+        Self {
+            bind_addr: addr.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// Shared state for the observability server.
+#[derive(Clone)]
+pub struct ObservabilityState {
+    health_checker: HealthChecker,
+    metrics_registry: Arc<RwLock<Option<MetricsRegistry>>>,
+}
+
+impl ObservabilityState {
+    /// Create new state with a health checker.
+    pub fn new(health_checker: HealthChecker) -> Self {
+        Self {
+            health_checker,
+            metrics_registry: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Set the metrics registry.
+    pub async fn set_metrics_registry(&self, registry: MetricsRegistry) {
+        *self.metrics_registry.write().await = Some(registry);
+    }
+
+    /// Get the health checker.
+    pub fn health_checker(&self) -> &HealthChecker {
+        &self.health_checker
+    }
+}
+
+/// Observability HTTP server.
+pub struct ObservabilityServer {
+    config: ObservabilityConfig,
+    state: ObservabilityState,
+}
+
+impl ObservabilityServer {
+    /// Create a new observability server.
+    pub fn new(config: ObservabilityConfig, health_checker: HealthChecker) -> Self {
+        Self {
+            config,
+            state: ObservabilityState::new(health_checker),
+        }
+    }
+
+    /// Create with default config.
+    pub fn with_defaults(health_checker: HealthChecker) -> Self {
+        Self::new(ObservabilityConfig::default(), health_checker)
+    }
+
+    /// Set the metrics registry.
+    pub async fn with_metrics(self, registry: MetricsRegistry) -> Self {
+        self.state.set_metrics_registry(registry).await;
+        self
+    }
+
+    /// Get the shared state for external use.
+    pub fn state(&self) -> ObservabilityState {
+        self.state.clone()
+    }
+
+    /// Build the router.
+    pub fn router(&self) -> Router {
+        let mut router = Router::new()
+            .route("/health", get(health_handler))
+            .route("/healthz", get(health_handler))
+            .route("/ready", get(ready_handler))
+            .route("/readyz", get(ready_handler))
+            .route("/live", get(live_handler))
+            .route("/livez", get(live_handler))
+            .route("/metrics", get(metrics_handler))
+            .with_state(self.state.clone());
+
+        if self.config.enable_cors {
+            router = router.layer(CorsLayer::new().allow_origin(Any).allow_methods(Any));
+        }
+
+        if self.config.enable_tracing {
+            router = router.layer(TraceLayer::new_for_http());
+        }
+
+        router
+    }
+
+    /// Start the server (blocking).
+    pub async fn serve(self) -> Result<(), std::io::Error> {
+        let router = self.router();
+        let listener = tokio::net::TcpListener::bind(self.config.bind_addr).await?;
+
+        tracing::info!(
+            addr = %self.config.bind_addr,
+            "Starting observability server"
+        );
+
+        axum::serve(listener, router).await
+    }
+
+    /// Start the server in the background.
+    pub fn spawn(self) -> tokio::task::JoinHandle<Result<(), std::io::Error>> {
+        tokio::spawn(async move { self.serve().await })
+    }
+}
+
+/// Health check endpoint handler.
+async fn health_handler(State(state): State<ObservabilityState>) -> impl IntoResponse {
+    let health = state.health_checker.get_health().await;
+    let status_code = health_to_status_code(&health);
+    (status_code, Json(health))
+}
+
+/// Readiness check endpoint handler.
+async fn ready_handler(State(state): State<ObservabilityState>) -> impl IntoResponse {
+    let readiness = state.health_checker.get_readiness().await;
+    let status_code = if readiness.ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status_code, Json(readiness))
+}
+
+/// Liveness check endpoint handler.
+async fn live_handler(State(state): State<ObservabilityState>) -> impl IntoResponse {
+    let liveness = state.health_checker.get_liveness().await;
+    // Liveness is always OK if we can respond
+    (StatusCode::OK, Json(liveness))
+}
+
+/// Metrics endpoint handler (Prometheus format).
+async fn metrics_handler(State(state): State<ObservabilityState>) -> Response {
+    let registry = state.metrics_registry.read().await;
+    match registry.as_ref() {
+        Some(reg) => {
+            let body = reg.render();
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/plain; version=0.0.4; charset=utf-8")
+                .body(body.into())
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/plain; version=0.0.4; charset=utf-8")
+            .body("# No metrics registry configured\n".into())
+            .unwrap(),
+    }
+}
+
+/// Convert health status to HTTP status code.
+fn health_to_status_code(health: &AggregatedHealth) -> StatusCode {
+    match health.status {
+        crate::health::HealthStatus::Healthy => StatusCode::OK,
+        crate::health::HealthStatus::Degraded => StatusCode::OK, // Still serving
+        crate::health::HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
+        crate::health::HealthStatus::Unknown => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    async fn setup_test_server() -> Router {
+        let health_checker = HealthChecker::new("test-service", "1.0.0");
+        let server = ObservabilityServer::new(
+            ObservabilityConfig::default(),
+            health_checker,
+        );
+        server.router()
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint() {
+        let router = setup_test_server().await;
+
+        let response = router
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        // Unknown status initially
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_healthz_endpoint() {
+        let router = setup_test_server().await;
+
+        let response = router
+            .oneshot(Request::builder().uri("/healthz").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_ready_endpoint() {
+        let health_checker = HealthChecker::new("test", "1.0.0");
+        let server = ObservabilityServer::new(
+            ObservabilityConfig::default(),
+            health_checker.clone(),
+        );
+        let router = server.router();
+
+        // Initially not ready
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Mark ready
+        health_checker.set_ready().await;
+        let response = router
+            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_live_endpoint() {
+        let router = setup_test_server().await;
+
+        let response = router
+            .oneshot(Request::builder().uri("/live").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        // Liveness is always OK if responding
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_endpoint() {
+        let router = setup_test_server().await;
+
+        let response = router
+            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_config_defaults() {
+        let config = ObservabilityConfig::default();
+        assert_eq!(config.bind_addr.port(), 9090);
+        assert!(config.enable_cors);
+        assert!(config.enable_tracing);
+    }
+
+    #[test]
+    fn test_config_with_port() {
+        let config = ObservabilityConfig::with_port(8080);
+        assert_eq!(config.bind_addr.port(), 8080);
+    }
+}
