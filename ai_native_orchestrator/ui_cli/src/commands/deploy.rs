@@ -24,11 +24,12 @@ pub struct DeployArgs {
     #[arg(short, long, default_value = "1")]
     replicas: u32,
 
-    /// Container port
-    #[arg(short, long)]
-    port: Option<u16>,
+    /// Container ports (format: CONTAINER_PORT or CONTAINER_PORT:HOST_PORT, can be repeated)
+    /// Examples: --port 80 --port 443:8443
+    #[arg(short, long, value_parser = parse_port_mapping)]
+    port: Vec<PortSpec>,
 
-    /// CPU request in millicores
+    /// CPU request in millicores (e.g., 100 = 0.1 cores, 1000 = 1 core)
     #[arg(long, default_value = "100")]
     cpu: u64,
 
@@ -36,13 +37,57 @@ pub struct DeployArgs {
     #[arg(long, default_value = "128")]
     memory: u64,
 
+    /// Disk request in MB (optional)
+    #[arg(long, default_value = "0")]
+    disk: u64,
+
     /// Environment variables (KEY=VALUE format, can be repeated)
+    /// Example: --env DB_HOST=localhost --env DB_PORT=5432
     #[arg(short, long, value_parser = parse_env_var)]
     env: Vec<(String, String)>,
 
     /// Labels (key=value format, can be repeated)
+    /// Example: --label app=nginx --label tier=frontend
     #[arg(short, long, value_parser = parse_env_var)]
     label: Vec<(String, String)>,
+}
+
+/// Parsed port specification.
+#[derive(Debug, Clone)]
+pub struct PortSpec {
+    pub container_port: u16,
+    pub host_port: Option<u16>,
+}
+
+fn parse_port_mapping(s: &str) -> std::result::Result<PortSpec, String> {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts.len() {
+        1 => {
+            let container_port = parts[0]
+                .parse::<u16>()
+                .map_err(|_| format!("Invalid port number: {}", parts[0]))?;
+            Ok(PortSpec {
+                container_port,
+                host_port: None,
+            })
+        }
+        2 => {
+            let container_port = parts[0]
+                .parse::<u16>()
+                .map_err(|_| format!("Invalid container port: {}", parts[0]))?;
+            let host_port = parts[1]
+                .parse::<u16>()
+                .map_err(|_| format!("Invalid host port: {}", parts[1]))?;
+            Ok(PortSpec {
+                container_port,
+                host_port: Some(host_port),
+            })
+        }
+        _ => Err(format!(
+            "Invalid port format '{}'. Use CONTAINER_PORT or CONTAINER_PORT:HOST_PORT",
+            s
+        )),
+    }
 }
 
 fn parse_env_var(s: &str) -> std::result::Result<(String, String), String> {
@@ -53,34 +98,51 @@ fn parse_env_var(s: &str) -> std::result::Result<(String, String), String> {
     Ok((parts[0].to_string(), parts[1].to_string()))
 }
 
-/// Create workload request.
+/// Create workload request - matches API's CreateWorkloadRequest.
 #[derive(Debug, Serialize)]
 struct CreateWorkloadRequest {
     name: String,
     replicas: u32,
+    #[serde(default)]
     labels: std::collections::HashMap<String, String>,
-    containers: Vec<ContainerRequest>,
+    containers: Vec<ContainerConfigRequest>,
 }
 
+/// Container configuration - matches API's ContainerConfigRequest.
 #[derive(Debug, Serialize)]
-struct ContainerRequest {
+struct ContainerConfigRequest {
     name: String,
     image: String,
-    ports: Vec<PortRequest>,
-    env: std::collections::HashMap<String, String>,
-    resources: ResourceRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    args: Option<Vec<String>>,
+    #[serde(default)]
+    env_vars: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    ports: Vec<PortMappingRequest>,
+    #[serde(default)]
+    resource_requests: ResourceRequestsRequest,
 }
 
+/// Port mapping - matches API's PortMappingRequest.
 #[derive(Debug, Serialize)]
-struct PortRequest {
+struct PortMappingRequest {
     container_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host_port: Option<u16>,
     protocol: String,
 }
 
-#[derive(Debug, Serialize)]
-struct ResourceRequest {
-    cpu_millicores: u64,
+/// Resource requests - matches API's ResourceRequestsRequest.
+#[derive(Debug, Serialize, Default)]
+struct ResourceRequestsRequest {
+    #[serde(default)]
+    cpu_cores: f32,
+    #[serde(default)]
     memory_mb: u64,
+    #[serde(default)]
+    disk_mb: u64,
 }
 
 /// Workload response from API.
@@ -116,27 +178,48 @@ pub async fn execute(args: DeployArgs, api_url: &str, format: OutputFormat) -> a
         env.insert(key, value);
     }
 
-    let ports = if let Some(port) = args.port {
-        vec![PortRequest {
-            container_port: port,
-            protocol: "TCP".to_string(),
-        }]
-    } else {
-        vec![]
-    };
+    // Convert port specs to API format
+    let ports: Vec<PortMappingRequest> = args
+        .port
+        .iter()
+        .map(|p| PortMappingRequest {
+            container_port: p.container_port,
+            host_port: p.host_port,
+            protocol: "tcp".to_string(),
+        })
+        .collect();
+
+    // Save counts for status message before moving values
+    let port_count = ports.len();
+    let env_count = env.len();
+
+    // Build port strings for status message
+    let port_strs: Vec<String> = ports
+        .iter()
+        .map(|p| match p.host_port {
+            Some(hp) => format!("{}:{}", p.container_port, hp),
+            None => p.container_port.to_string(),
+        })
+        .collect();
+
+    // Convert CPU from millicores to cores (e.g., 100 millicores = 0.1 cores)
+    let cpu_cores = args.cpu as f32 / 1000.0;
 
     let request = CreateWorkloadRequest {
         name: args.name.clone(),
         replicas: args.replicas,
         labels,
-        containers: vec![ContainerRequest {
+        containers: vec![ContainerConfigRequest {
             name: args.name.clone(),
             image: args.image.clone(),
+            command: None,
+            args: None,
+            env_vars: env,
             ports,
-            env,
-            resources: ResourceRequest {
-                cpu_millicores: args.cpu,
+            resource_requests: ResourceRequestsRequest {
+                cpu_cores,
                 memory_mb: args.memory,
+                disk_mb: args.disk,
             },
         }],
     };
@@ -147,10 +230,23 @@ pub async fn execute(args: DeployArgs, api_url: &str, format: OutputFormat) -> a
     output::success(&format!("Workload '{}' deployed successfully!", args.name));
     print_item(&response, format)?;
 
-    output::info(&format!(
+    // Build informative status message
+    let mut info_parts = vec![format!(
         "Scheduling {} replica(s) with image '{}'",
         args.replicas, args.image
-    ));
+    )];
+
+    if port_count > 0 {
+        info_parts.push(format!("Exposing ports: {}", port_strs.join(", ")));
+    }
+
+    if env_count > 0 {
+        info_parts.push(format!("With {} environment variable(s)", env_count));
+    }
+
+    for part in info_parts {
+        output::info(&part);
+    }
     output::info("Use 'orch status' to check deployment progress");
 
     Ok(())

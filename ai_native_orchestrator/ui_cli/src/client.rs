@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_sign_request() {
         let signing_key = SigningKey::generate(&mut OsRng);
-        let client = ApiClient::new("http://localhost:3000").with_signing_key(signing_key);
+        let client = ApiClient::new("http://localhost:9090").with_signing_key(signing_key);
 
         let headers = client.sign_request("GET", "/api/v1/nodes", &[]);
         assert!(headers.is_some());
@@ -199,10 +199,10 @@ mod tests {
 
     #[test]
     fn test_url_construction() {
-        let client = ApiClient::new("http://localhost:3000/");
-        assert_eq!(client.url("/api/v1/nodes"), "http://localhost:3000/api/v1/nodes");
+        let client = ApiClient::new("http://localhost:9090/");
+        assert_eq!(client.url("/api/v1/nodes"), "http://localhost:9090/api/v1/nodes");
 
-        let client = ApiClient::new("http://localhost:3000");
-        assert_eq!(client.url("/api/v1/nodes"), "http://localhost:3000/api/v1/nodes");
+        let client = ApiClient::new("http://localhost:9090");
+        assert_eq!(client.url("/api/v1/nodes"), "http://localhost:9090/api/v1/nodes");
     }
 }

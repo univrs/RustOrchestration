@@ -11,12 +11,33 @@
 //! - `PUBLIC_ADDR`: Address to advertise to peers (default: same as LISTEN_ADDR)
 //! - `SEED_NODES`: Comma-separated list of seed node addresses (required for workers)
 //! - `CLUSTER_ID`: Cluster identifier (default: "orchestrator-cluster")
-//! - `API_PORT`: HTTP API port for health/metrics (default: 9090)
+//! - `API_PORT`: HTTP API port for REST API and health/metrics (default: 9090)
 //! - `NODE_CPU`: CPU cores capacity (default: 4.0)
 //! - `NODE_MEMORY_MB`: Memory capacity in MB (default: 8192)
 //! - `NODE_DISK_MB`: Disk capacity in MB (default: 102400)
 //! - `LOG_LEVEL`: Log level (default: "info")
 //! - `LOG_JSON`: Use JSON log format (default: false)
+//! - `AUTH_DISABLED`: Disable Ed25519 request authentication (default: true for dev)
+//!
+//! # API Endpoints (port 9090 by default)
+//!
+//! ## REST API (requires `rest-api` feature)
+//! - `POST /api/v1/workloads` - Create workload
+//! - `GET /api/v1/workloads` - List workloads
+//! - `GET /api/v1/workloads/:id` - Get workload
+//! - `PUT /api/v1/workloads/:id` - Update workload
+//! - `DELETE /api/v1/workloads/:id` - Delete workload
+//! - `GET /api/v1/workloads/:id/instances` - List instances
+//! - `GET /api/v1/nodes` - List nodes
+//! - `GET /api/v1/nodes/:id` - Get node
+//! - `GET /api/v1/cluster/status` - Cluster status
+//!
+//! ## Observability (requires `observability` feature)
+//! - `GET /health` - Health check
+//! - `GET /ready` - Readiness probe
+//! - `GET /live` - Liveness probe
+//! - `GET /metrics` - Prometheus metrics
+//! - `GET /api/v1/events` - WebSocket event streaming
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -44,6 +65,9 @@ use observability::{
     EventHub, HealthChecker, MetricsRegistry, ObservabilityConfig, ObservabilityServer,
 };
 
+#[cfg(feature = "rest-api")]
+use orchestrator_core::api::{ApiState, AuthConfig, build_router as build_api_router};
+
 /// Node configuration parsed from environment.
 #[derive(Debug, Clone)]
 struct NodeConfig {
@@ -59,6 +83,8 @@ struct NodeConfig {
     disk_mb: u64,
     log_level: String,
     log_json: bool,
+    /// Disable authentication for development
+    auth_disabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -140,6 +166,10 @@ impl NodeConfig {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
+        let auth_disabled = std::env::var("AUTH_DISABLED")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(true); // Disabled by default for development
+
         Ok(NodeConfig {
             node_id,
             role,
@@ -153,6 +183,7 @@ impl NodeConfig {
             disk_mb,
             log_level,
             log_json,
+            auth_disabled,
         })
     }
 }
@@ -335,7 +366,7 @@ async fn main() -> Result<()> {
         "Orchestrator service started"
     );
 
-    // Start health/metrics server if observability is enabled
+    // Start combined API/observability server
     #[cfg(feature = "observability")]
     {
         let health_checker = HealthChecker::new(
@@ -354,7 +385,37 @@ async fn main() -> Result<()> {
         let event_hub = EventHub::default();
         let event_hub_clone = event_hub.clone();
 
-        let obs_server = ObservabilityServer::new(obs_config, health_checker)
+        // Build API router if rest-api feature is enabled
+        #[cfg(feature = "rest-api")]
+        let api_router = {
+            // Create API state
+            let auth_config = if config.auth_disabled {
+                AuthConfig::disabled()
+            } else {
+                AuthConfig::default()
+            };
+
+            let api_state = ApiState::new(
+                state_store.clone(),
+                cluster_manager.clone() as Arc<dyn ClusterManager>,
+                _workload_tx.clone(),
+                auth_config,
+            );
+
+            // Build API router
+            build_api_router(api_state)
+        };
+
+        // Create observability server with optional API routes merged in
+        #[cfg(feature = "rest-api")]
+        let obs_server = ObservabilityServer::new(obs_config.clone(), health_checker)
+            .with_event_hub(event_hub)
+            .with_metrics(metrics_registry)
+            .await
+            .with_additional_routes(api_router);
+
+        #[cfg(not(feature = "rest-api"))]
+        let obs_server = ObservabilityServer::new(obs_config.clone(), health_checker)
             .with_event_hub(event_hub)
             .with_metrics(metrics_registry)
             .await;
@@ -380,12 +441,21 @@ async fn main() -> Result<()> {
             }
         });
 
+        // Start combined server using ObservabilityServer's serve method
         tokio::spawn(async move {
             if let Err(e) = obs_server.serve().await {
-                error!("Observability server error: {}", e);
+                error!("API server error: {}", e);
             }
         });
 
+        #[cfg(feature = "rest-api")]
+        info!(
+            api_port = config.api_port,
+            "Combined server started: REST API + WebSocket events + health/metrics at port {}",
+            config.api_port
+        );
+
+        #[cfg(not(feature = "rest-api"))]
         info!(
             api_port = config.api_port,
             "Observability server started with WebSocket event streaming at /api/v1/events"

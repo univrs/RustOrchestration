@@ -26,9 +26,11 @@ COPY cluster_manager ./cluster_manager
 COPY mcp_server ./mcp_server
 COPY observability ./observability
 COPY orchestrator_core ./orchestrator_core
+COPY user_config ./user_config
+COPY ui_cli ./ui_cli
 
 # Build the orchestrator node with cluster and observability support
-RUN cargo build --release -p orchestrator_core --features "cluster,observability" --bin orchestrator_node
+RUN cargo build --release -p orchestrator_core --features "cluster,observability,rest-api" --bin orchestrator_node
 
 # Stage 2: Runtime environment
 FROM debian:bookworm-slim AS runtime

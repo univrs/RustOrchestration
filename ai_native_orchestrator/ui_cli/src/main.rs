@@ -23,7 +23,7 @@ struct Cli {
         short,
         long,
         env = "ORCH_API_URL",
-        default_value = "http://localhost:3000"
+        default_value = "http://localhost:9090"
     )]
     api_url: String,
 

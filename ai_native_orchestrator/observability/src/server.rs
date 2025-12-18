@@ -114,9 +114,23 @@ impl ObservabilityState {
 }
 
 /// Observability HTTP server.
+///
+/// Supports merging additional routes (e.g., REST API routes) into the server.
+///
+/// # Example
+///
+/// ```ignore
+/// let server = ObservabilityServer::new(config, health_checker)
+///     .with_event_hub(event_hub)
+///     .with_metrics(metrics)
+///     .with_additional_routes(api_router)
+///     .await;
+/// server.serve().await?;
+/// ```
 pub struct ObservabilityServer {
     config: ObservabilityConfig,
     state: ObservabilityState,
+    additional_routes: Option<Router>,
 }
 
 impl ObservabilityServer {
@@ -125,6 +139,7 @@ impl ObservabilityServer {
         Self {
             config,
             state: ObservabilityState::new(health_checker),
+            additional_routes: None,
         }
     }
 
@@ -148,6 +163,26 @@ impl ObservabilityServer {
         self
     }
 
+    /// Add additional routes to be merged with the observability routes.
+    ///
+    /// This allows external routers (e.g., REST API routes) to be served
+    /// on the same server as the observability endpoints.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let api_router = Router::new()
+    ///     .route("/api/v1/workloads", get(list_workloads))
+    ///     .with_state(api_state);
+    ///
+    /// let server = ObservabilityServer::new(config, health_checker)
+    ///     .with_additional_routes(api_router);
+    /// ```
+    pub fn with_additional_routes(mut self, router: Router) -> Self {
+        self.additional_routes = Some(router);
+        self
+    }
+
     /// Get the shared state for external use.
     pub fn state(&self) -> ObservabilityState {
         self.state.clone()
@@ -159,7 +194,10 @@ impl ObservabilityServer {
     }
 
     /// Build the router.
-    pub fn router(&self) -> Router {
+    ///
+    /// Note: This method consumes any additional routes that were set.
+    /// Calling it multiple times will only include additional routes on the first call.
+    pub fn router(&mut self) -> Router {
         // Create the events API router with EventHub state
         let events_router = Router::new()
             .route("/events", get(events_ws_handler))
@@ -175,8 +213,14 @@ impl ObservabilityServer {
             .route("/livez", get(live_handler))
             .route("/metrics", get(metrics_handler))
             .with_state(self.state.clone())
-            // Nest the API under /api/v1
+            // Nest the events API under /api/v1
             .nest("/api/v1", events_router);
+
+        // Merge additional routes if provided (e.g., REST API routes)
+        // Note: take() consumes the Option, so additional routes are only included once
+        if let Some(additional) = self.additional_routes.take() {
+            router = router.merge(additional);
+        }
 
         if self.config.enable_cors {
             router = router.layer(CorsLayer::new().allow_origin(Any).allow_methods(Any));
@@ -190,7 +234,7 @@ impl ObservabilityServer {
     }
 
     /// Start the server (blocking).
-    pub async fn serve(self) -> Result<(), std::io::Error> {
+    pub async fn serve(mut self) -> Result<(), std::io::Error> {
         let router = self.router();
         let listener = tokio::net::TcpListener::bind(self.config.bind_addr).await?;
 
@@ -282,7 +326,7 @@ mod tests {
 
     async fn setup_test_server() -> Router {
         let health_checker = HealthChecker::new("test-service", "1.0.0");
-        let server = ObservabilityServer::new(
+        let mut server = ObservabilityServer::new(
             ObservabilityConfig::default(),
             health_checker,
         );
@@ -317,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn test_ready_endpoint() {
         let health_checker = HealthChecker::new("test", "1.0.0");
-        let server = ObservabilityServer::new(
+        let mut server = ObservabilityServer::new(
             ObservabilityConfig::default(),
             health_checker.clone(),
         );
