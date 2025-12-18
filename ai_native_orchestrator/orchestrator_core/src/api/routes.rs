@@ -23,7 +23,10 @@ pub fn build_router(state: ApiState) -> Router {
         .route("/:workload_id", get(handlers::get_workload))
         .route("/:workload_id", put(handlers::update_workload))
         .route("/:workload_id", delete(handlers::delete_workload))
-        .route("/:workload_id/instances", get(handlers::list_workload_instances));
+        .route("/:workload_id/instances", get(handlers::list_workload_instances))
+        .route("/:workload_id/logs", get(handlers::get_workload_logs))
+        .route("/:workload_id/logs/stream", get(handlers::stream_workload_logs))
+        .route("/:workload_id/instances/:instance_id/logs", get(handlers::get_instance_logs));
 
     // Node routes
     let node_routes = Router::new()

@@ -3,13 +3,18 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, Query, State,
+    },
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use container_runtime_interface::LogOptions as RuntimeLogOptions;
 
 use orchestrator_shared_types::{
     ContainerConfig, Node, NodeResources, NodeStatus, PortMapping,
@@ -154,6 +159,35 @@ pub struct ClusterStatusResponse {
     pub total_memory_mb: u64,
     pub total_cpu_allocatable: f32,
     pub total_memory_allocatable_mb: u64,
+}
+
+/// Query parameters for log requests.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct LogsQuery {
+    /// Return only the last N lines.
+    pub tail: Option<usize>,
+    /// Include timestamps in output.
+    #[serde(default)]
+    pub timestamps: bool,
+    /// Only return logs since this timestamp (RFC3339).
+    pub since: Option<String>,
+    /// Only return logs until this timestamp (RFC3339).
+    pub until: Option<String>,
+}
+
+/// Response for workload logs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsResponse {
+    /// Workload ID.
+    pub workload_id: Uuid,
+    /// Instance ID (if specific instance).
+    pub instance_id: Option<Uuid>,
+    /// Container ID (if specific container).
+    pub container_id: Option<String>,
+    /// The log content.
+    pub logs: String,
+    /// Number of lines returned.
+    pub lines: usize,
 }
 
 // ============================================================================
@@ -565,6 +599,294 @@ pub async fn get_cluster_status(
         total_cpu_allocatable,
         total_memory_allocatable_mb,
     }))
+}
+
+// ============================================================================
+// Log Handlers
+// ============================================================================
+
+/// Get logs for a workload.
+/// Returns logs from all instances/containers of the workload.
+pub async fn get_workload_logs(
+    State(state): State<ApiState>,
+    Path(workload_id): Path<Uuid>,
+    Query(query): Query<LogsQuery>,
+) -> ApiResult<impl IntoResponse> {
+    // Check runtime is available
+    let runtime = state.container_runtime.as_ref()
+        .ok_or_else(|| ApiError::internal_error("Container runtime not configured for log access"))?;
+
+    // Check workload exists
+    let _ = state
+        .state_store
+        .get_workload(&workload_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Workload", &workload_id.to_string()))?;
+
+    // Get instances for workload
+    let instances = state
+        .state_store
+        .list_instances_for_workload(&workload_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    if instances.is_empty() {
+        return Ok(Json(LogsResponse {
+            workload_id,
+            instance_id: None,
+            container_id: None,
+            logs: String::new(),
+            lines: 0,
+        }));
+    }
+
+    // Build log options
+    let log_options = RuntimeLogOptions {
+        tail: query.tail,
+        timestamps: query.timestamps,
+        since: query.since,
+        until: query.until,
+    };
+
+    // Collect logs from all containers
+    let mut all_logs = Vec::new();
+
+    for instance in &instances {
+        for container_id in &instance.container_ids {
+            match runtime.get_container_logs(container_id, &log_options).await {
+                Ok(logs) if !logs.is_empty() => {
+                    all_logs.push(format!("=== Container: {} ===\n{}", container_id, logs));
+                }
+                Ok(_) => {} // Empty logs
+                Err(e) => {
+                    tracing::warn!("Failed to get logs for container {}: {}", container_id, e);
+                }
+            }
+        }
+    }
+
+    let combined_logs = all_logs.join("\n\n");
+    let line_count = combined_logs.lines().count();
+
+    Ok(Json(LogsResponse {
+        workload_id,
+        instance_id: None,
+        container_id: None,
+        logs: combined_logs,
+        lines: line_count,
+    }))
+}
+
+/// Get logs for a specific workload instance.
+pub async fn get_instance_logs(
+    State(state): State<ApiState>,
+    Path((workload_id, instance_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<LogsQuery>,
+) -> ApiResult<impl IntoResponse> {
+    // Check runtime is available
+    let runtime = state.container_runtime.as_ref()
+        .ok_or_else(|| ApiError::internal_error("Container runtime not configured for log access"))?;
+
+    // Check workload exists
+    let _ = state
+        .state_store
+        .get_workload(&workload_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Workload", &workload_id.to_string()))?;
+
+    // Get the specific instance
+    let instances = state
+        .state_store
+        .list_instances_for_workload(&workload_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    let instance = instances
+        .into_iter()
+        .find(|i| i.id == instance_id)
+        .ok_or_else(|| ApiError::not_found("Instance", &instance_id.to_string()))?;
+
+    // Build log options
+    let log_options = RuntimeLogOptions {
+        tail: query.tail,
+        timestamps: query.timestamps,
+        since: query.since,
+        until: query.until,
+    };
+
+    // Collect logs from all containers in this instance
+    let mut all_logs = Vec::new();
+
+    for container_id in &instance.container_ids {
+        match runtime.get_container_logs(container_id, &log_options).await {
+            Ok(logs) if !logs.is_empty() => {
+                all_logs.push(format!("=== Container: {} ===\n{}", container_id, logs));
+            }
+            Ok(_) => {} // Empty logs
+            Err(e) => {
+                tracing::warn!("Failed to get logs for container {}: {}", container_id, e);
+            }
+        }
+    }
+
+    let combined_logs = all_logs.join("\n\n");
+    let line_count = combined_logs.lines().count();
+
+    Ok(Json(LogsResponse {
+        workload_id,
+        instance_id: Some(instance_id),
+        container_id: None,
+        logs: combined_logs,
+        lines: line_count,
+    }))
+}
+
+/// WebSocket endpoint for streaming logs in real-time.
+/// Connects to the container runtime's log stream and forwards messages.
+pub async fn stream_workload_logs(
+    State(state): State<ApiState>,
+    Path(workload_id): Path<Uuid>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_log_stream(socket, state, workload_id))
+}
+
+/// Handle WebSocket connection for log streaming.
+async fn handle_log_stream(
+    mut socket: WebSocket,
+    state: ApiState,
+    workload_id: Uuid,
+) {
+    // Check runtime is available
+    let runtime = match state.container_runtime.as_ref() {
+        Some(rt) => rt,
+        None => {
+            let _ = socket.send(Message::Text(
+                r#"{"error":"Container runtime not configured for log streaming"}"#.into()
+            )).await;
+            let _ = socket.close().await;
+            return;
+        }
+    };
+
+    // Check workload exists
+    match state.state_store.get_workload(&workload_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            let _ = socket.send(Message::Text(
+                format!(r#"{{"error":"Workload {} not found"}}"#, workload_id)
+            )).await;
+            let _ = socket.close().await;
+            return;
+        }
+        Err(e) => {
+            let _ = socket.send(Message::Text(
+                format!(r#"{{"error":"Failed to check workload: {}"}}"#, e)
+            )).await;
+            let _ = socket.close().await;
+            return;
+        }
+    }
+
+    // Get instances for workload
+    let instances = match state
+        .state_store
+        .list_instances_for_workload(&workload_id)
+        .await
+    {
+        Ok(instances) => instances,
+        Err(e) => {
+            let _ = socket.send(Message::Text(
+                format!(r#"{{"error":"Failed to list instances: {}"}}"#, e)
+            )).await;
+            let _ = socket.close().await;
+            return;
+        }
+    };
+
+    if instances.is_empty() {
+        let _ = socket.send(Message::Text(
+            r#"{"info":"No instances for this workload"}"#.into()
+        )).await;
+        let _ = socket.close().await;
+        return;
+    }
+
+    // Send initial message
+    let _ = socket.send(Message::Text(
+        format!(r#"{{"status":"connected","workload_id":"{}","instances":{}}}"#,
+            workload_id,
+            instances.len()
+        )
+    )).await;
+
+    // Build log options for follow mode
+    let log_options = RuntimeLogOptions {
+        tail: Some(100), // Start with last 100 lines
+        timestamps: true,
+        since: None,
+        until: None,
+    };
+
+    // Stream logs from all containers
+    // For now, poll periodically since the runtime interface doesn't expose streaming
+    let mut last_line_counts: HashMap<String, usize> = HashMap::new();
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                for instance in &instances {
+                    for container_id in &instance.container_ids {
+                        match runtime.get_container_logs(container_id, &log_options).await {
+                            Ok(logs) if !logs.is_empty() => {
+                                let lines: Vec<&str> = logs.lines().collect();
+                                let line_count = lines.len();
+                                let last_count = *last_line_counts.get(container_id).unwrap_or(&0);
+
+                                if line_count > last_count {
+                                    // Send new lines
+                                    for line in lines.iter().skip(last_count) {
+                                        let msg = serde_json::json!({
+                                            "container_id": container_id,
+                                            "instance_id": instance.id.to_string(),
+                                            "log": line
+                                        });
+                                        if socket.send(Message::Text(msg.to_string())).await.is_err() {
+                                            return; // Client disconnected
+                                        }
+                                    }
+                                    last_line_counts.insert(container_id.clone(), line_count);
+                                }
+                            }
+                            Ok(_) => {} // Empty logs
+                            Err(e) => {
+                                tracing::debug!("Log fetch error for {}: {}", container_id, e);
+                            }
+                        }
+                    }
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => {
+                        tracing::debug!("WebSocket closed for workload {}", workload_id);
+                        return;
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        let _ = socket.send(Message::Pong(data)).await;
+                    }
+                    Some(Err(e)) => {
+                        tracing::debug!("WebSocket error: {}", e);
+                        return;
+                    }
+                    _ => {} // Ignore other messages
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

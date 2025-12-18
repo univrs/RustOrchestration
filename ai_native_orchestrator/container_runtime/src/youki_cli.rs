@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -357,28 +358,305 @@ impl YoukiCliRuntime {
         Ok(state)
     }
 
-    // ==================== Helper Methods ====================
+    // ==================== Log Management Methods ====================
 
-    /// Get container logs from state_root.
+    /// Get log directory for a container.
+    fn log_dir(&self, container_id: &str) -> PathBuf {
+        self.config.state_root.join(container_id)
+    }
+
+    /// Get log file path for a container.
+    fn log_path(&self, container_id: &str) -> PathBuf {
+        self.log_dir(container_id).join("container.log")
+    }
+
+    /// Initialize log capture for a container.
+    /// Creates log directory and empty log file.
+    async fn init_log_capture(&self, container_id: &str) -> std::result::Result<PathBuf, YoukiCliError> {
+        let log_dir = self.log_dir(container_id);
+        tokio::fs::create_dir_all(&log_dir).await?;
+
+        let log_path = self.log_path(container_id);
+
+        // Create empty log file if it doesn't exist
+        if !log_path.exists() {
+            tokio::fs::File::create(&log_path).await?;
+        }
+
+        debug!("Log capture initialized at {:?}", log_path);
+        Ok(log_path)
+    }
+
+    /// Get container logs from state_root (simple version for backward compatibility).
     pub async fn get_logs(&self, container_id: &str, tail: Option<usize>) -> std::result::Result<String, YoukiCliError> {
-        let log_path = self.config.state_root
-            .join(container_id)
-            .join("container.log");
+        self.get_logs_with_options(container_id, &LogOptions {
+            tail,
+            ..Default::default()
+        }).await
+    }
+
+    /// Get container logs with full options support.
+    pub async fn get_logs_with_options(
+        &self,
+        container_id: &str,
+        options: &LogOptions,
+    ) -> std::result::Result<String, YoukiCliError> {
+        let log_path = self.log_path(container_id);
 
         if !log_path.exists() {
             return Ok(String::new());
         }
 
         let content = tokio::fs::read_to_string(&log_path).await?;
+        let mut lines: Vec<&str> = content.lines().collect();
 
-        if let Some(n) = tail {
-            let lines: Vec<&str> = content.lines().collect();
+        // Apply tail filter
+        if let Some(n) = options.tail {
             let start = lines.len().saturating_sub(n);
-            Ok(lines[start..].join("\n"))
+            lines = lines[start..].to_vec();
+        }
+
+        // Apply since/until filters if timestamps are present in log lines
+        if options.since.is_some() || options.until.is_some() {
+            lines = lines.into_iter().filter(|line| {
+                // Try to extract timestamp from line (format: "TIMESTAMP STREAM MESSAGE")
+                if let Some(ts_str) = line.split_whitespace().next() {
+                    if let Some(ref since) = options.since {
+                        if ts_str < since.as_str() {
+                            return false;
+                        }
+                    }
+                    if let Some(ref until) = options.until {
+                        if ts_str > until.as_str() {
+                            return false;
+                        }
+                    }
+                }
+                true
+            }).collect();
+        }
+
+        // Strip timestamps if not requested
+        if !options.timestamps {
+            lines = lines.iter().map(|line| {
+                // Try to strip timestamp prefix (format: "TIMESTAMP STREAM MESSAGE")
+                let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                if parts.len() >= 3 {
+                    parts[2] // Return just the message
+                } else {
+                    line
+                }
+            }).collect();
+        }
+
+        Ok(lines.join("\n"))
+    }
+
+    /// Get structured log entries.
+    pub async fn get_log_entries(
+        &self,
+        container_id: &str,
+        options: &LogOptions,
+    ) -> std::result::Result<Vec<LogEntry>, YoukiCliError> {
+        let log_path = self.log_path(container_id);
+
+        if !log_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = tokio::fs::read_to_string(&log_path).await?;
+        let mut entries: Vec<LogEntry> = content
+            .lines()
+            .filter_map(|line| Self::parse_log_line(line))
+            .collect();
+
+        // Apply tail filter
+        if let Some(n) = options.tail {
+            let start = entries.len().saturating_sub(n);
+            entries = entries[start..].to_vec();
+        }
+
+        // Apply since/until filters
+        if let Some(ref since) = options.since {
+            entries.retain(|e| e.timestamp.as_str() >= since.as_str());
+        }
+        if let Some(ref until) = options.until {
+            entries.retain(|e| e.timestamp.as_str() <= until.as_str());
+        }
+
+        Ok(entries)
+    }
+
+    /// Parse a single log line into a LogEntry.
+    fn parse_log_line(line: &str) -> Option<LogEntry> {
+        if line.is_empty() {
+            return None;
+        }
+
+        // Expected format: "TIMESTAMP STREAM MESSAGE"
+        // e.g., "2024-01-15T10:30:00.123Z stdout Hello world"
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+
+        // Check if first part looks like a timestamp (contains 'T' for RFC3339)
+        let has_timestamp = parts.first()
+            .map(|p| p.contains('T') && p.len() > 10)
+            .unwrap_or(false);
+
+        if has_timestamp && parts.len() >= 3 {
+            // Full format: TIMESTAMP STREAM MESSAGE
+            Some(LogEntry {
+                timestamp: parts[0].to_string(),
+                stream: parts[1].to_string(),
+                message: parts[2].to_string(),
+            })
+        } else if has_timestamp && parts.len() == 2 {
+            // Format: TIMESTAMP MESSAGE (no stream)
+            Some(LogEntry {
+                timestamp: parts[0].to_string(),
+                stream: "stdout".to_string(),
+                message: parts[1].to_string(),
+            })
         } else {
-            Ok(content)
+            // Fallback for lines without timestamp - use current time
+            Some(LogEntry {
+                timestamp: Utc::now().to_rfc3339(),
+                stream: "stdout".to_string(),
+                message: line.to_string(),
+            })
         }
     }
+
+    /// Start streaming logs for a container (follow mode).
+    /// Returns a receiver that will receive new log entries as they appear.
+    pub async fn stream_logs(
+        &self,
+        container_id: &str,
+    ) -> std::result::Result<LogReceiver, YoukiCliError> {
+        let log_path = self.log_path(container_id);
+
+        // Check if already streaming
+        {
+            let streams = self.log_streams.read().await;
+            if let Some(handle) = streams.get(container_id) {
+                return Ok(handle.sender.subscribe());
+            }
+        }
+
+        // Create broadcast channel
+        let (sender, receiver) = broadcast::channel(1024);
+        let sender_clone = sender.clone();
+        let container_id_owned = container_id.to_string();
+
+        // Spawn log watcher task
+        let watcher = tokio::spawn(async move {
+            if let Err(e) = Self::watch_log_file(log_path, sender_clone).await {
+                error!("Log watcher error for {}: {}", container_id_owned, e);
+            }
+        });
+
+        // Store handle
+        let handle = LogStreamHandle {
+            sender: sender.clone(),
+            _watcher: watcher,
+        };
+
+        self.log_streams.write().await.insert(container_id.to_string(), handle);
+
+        Ok(receiver)
+    }
+
+    /// Internal log file watcher that sends entries to the broadcast channel.
+    async fn watch_log_file(
+        log_path: PathBuf,
+        sender: broadcast::Sender<LogEntry>,
+    ) -> std::result::Result<(), YoukiCliError> {
+        // Wait for file to exist
+        let mut retries = 0;
+        while !log_path.exists() && retries < 30 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            retries += 1;
+        }
+
+        if !log_path.exists() {
+            return Err(YoukiCliError::LogError(format!(
+                "Log file not found: {:?}", log_path
+            )));
+        }
+
+        let file = tokio::fs::File::open(&log_path).await?;
+        let mut reader = BufReader::new(file);
+
+        // Seek to end to only stream new entries
+        reader.seek(SeekFrom::End(0)).await?;
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    // No new data, wait and retry
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+
+                    // Check if channel is closed
+                    if sender.receiver_count() == 0 {
+                        debug!("No more receivers, stopping log watcher");
+                        break;
+                    }
+                }
+                Ok(_) => {
+                    if let Some(entry) = Self::parse_log_line(line.trim()) {
+                        // Send to channel, ignore errors (no receivers)
+                        let _ = sender.send(entry);
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading log file: {}", e);
+                    return Err(YoukiCliError::Io(e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Stop streaming logs for a container.
+    pub async fn stop_log_stream(&self, container_id: &str) {
+        let mut streams = self.log_streams.write().await;
+        if let Some(handle) = streams.remove(container_id) {
+            // Abort the watcher task
+            handle._watcher.abort();
+            debug!("Stopped log stream for {}", container_id);
+        }
+    }
+
+    /// Write a log entry to the container's log file.
+    pub async fn write_log(
+        &self,
+        container_id: &str,
+        stream: &str,
+        message: &str,
+    ) -> std::result::Result<(), YoukiCliError> {
+        let log_path = self.log_path(container_id);
+
+        // Ensure log directory exists
+        if let Some(parent) = log_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let timestamp = Utc::now().to_rfc3339();
+        let line = format!("{} {} {}\n", timestamp, stream, message);
+
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .await?;
+
+        file.write_all(line.as_bytes()).await?;
+        Ok(())
+    }
+
+    // ==================== Resource Stats Methods ====================
 
     /// Get basic stats from cgroups.
     pub async fn get_stats(&self, container_id: &str) -> std::result::Result<ContainerStats, YoukiCliError> {
@@ -499,6 +777,16 @@ impl ContainerRuntime for YoukiCliRuntime {
         builder.build()
             .map_err(|e| OrchestrationError::RuntimeError(format!("Failed to build bundle: {}", e)))?;
 
+        // Initialize log capture before starting container
+        self.init_log_capture(&container_id)
+            .await
+            .map_err(|e| OrchestrationError::RuntimeError(format!("Failed to init log capture: {}", e)))?;
+
+        // Write initial log entry
+        self.write_log(&container_id, "system", &format!("Container {} starting", container_id))
+            .await
+            .ok(); // Don't fail on log write errors
+
         // youki create
         self.youki_create(&container_id, &bundle_path)
             .await
@@ -531,6 +819,11 @@ impl ContainerRuntime for YoukiCliRuntime {
     async fn stop_container(&self, container_id: &ContainerId) -> Result<()> {
         info!("YoukiCliRuntime: Stopping container {}", container_id);
 
+        // Write stop log entry
+        self.write_log(container_id, "system", "Container stop requested")
+            .await
+            .ok();
+
         // Send SIGTERM
         if let Err(e) = self.youki_kill(container_id, "SIGTERM").await {
             warn!("SIGTERM failed: {}", e);
@@ -543,6 +836,9 @@ impl ContainerRuntime for YoukiCliRuntime {
                 Ok(state) if state.status == "stopped" => break,
                 Ok(_) if tokio::time::Instant::now() >= deadline => {
                     warn!("Container {} didn't stop, sending SIGKILL", container_id);
+                    self.write_log(container_id, "system", "Container timed out, sending SIGKILL")
+                        .await
+                        .ok();
                     self.youki_kill(container_id, "SIGKILL").await.ok();
                     break;
                 }
@@ -551,6 +847,14 @@ impl ContainerRuntime for YoukiCliRuntime {
                 Err(e) => return Err(OrchestrationError::RuntimeError(e.to_string())),
             }
         }
+
+        // Stop any active log streams
+        self.stop_log_stream(container_id).await;
+
+        // Write final log entry
+        self.write_log(container_id, "system", "Container stopped")
+            .await
+            .ok();
 
         // Update state
         if let Some(state) = self.containers.write().await.get_mut(container_id) {
@@ -562,6 +866,9 @@ impl ContainerRuntime for YoukiCliRuntime {
 
     async fn remove_container(&self, container_id: &ContainerId) -> Result<()> {
         info!("YoukiCliRuntime: Removing container {}", container_id);
+
+        // Stop any active log streams before removal
+        self.stop_log_stream(container_id).await;
 
         // youki delete --force
         self.youki_delete(container_id, true)
@@ -576,6 +883,12 @@ impl ContainerRuntime for YoukiCliRuntime {
             if let Some(list) = by_node.get_mut(&state.node_id) {
                 list.retain(|id| id != container_id);
             }
+        }
+
+        // Cleanup log directory
+        let log_dir = self.log_dir(container_id);
+        if log_dir.exists() {
+            tokio::fs::remove_dir_all(&log_dir).await.ok();
         }
 
         Ok(())
@@ -640,6 +953,25 @@ impl ContainerRuntime for YoukiCliRuntime {
 
         Ok(statuses)
     }
+
+    async fn get_container_logs(
+        &self,
+        container_id: &ContainerId,
+        options: &container_runtime_interface::LogOptions,
+    ) -> Result<String> {
+        // Convert interface LogOptions to our internal LogOptions
+        let internal_options = LogOptions {
+            tail: options.tail,
+            timestamps: options.timestamps,
+            since: options.since.clone(),
+            until: options.until.clone(),
+            follow: false, // follow mode not supported via this sync API
+        };
+
+        self.get_logs_with_options(container_id, &internal_options)
+            .await
+            .map_err(|e| OrchestrationError::RuntimeError(e.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -683,5 +1015,73 @@ mod tests {
             memory_usage_bytes: 1048576,
         };
         assert_eq!(stats.memory_usage_bytes, 1024 * 1024);
+    }
+
+    #[test]
+    fn test_log_entry_serde() {
+        let entry = LogEntry {
+            timestamp: "2024-01-15T10:30:00.123Z".to_string(),
+            stream: "stdout".to_string(),
+            message: "Hello world".to_string(),
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: LogEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.timestamp, entry.timestamp);
+        assert_eq!(deserialized.stream, entry.stream);
+        assert_eq!(deserialized.message, entry.message);
+    }
+
+    #[test]
+    fn test_log_options_default() {
+        let options = LogOptions::default();
+        assert!(options.tail.is_none());
+        assert!(!options.timestamps);
+        assert!(options.since.is_none());
+        assert!(options.until.is_none());
+        assert!(!options.follow);
+    }
+
+    #[test]
+    fn test_parse_log_line_full() {
+        let line = "2024-01-15T10:30:00.123Z stdout Hello world";
+        let entry = YoukiCliRuntime::parse_log_line(line).unwrap();
+        assert_eq!(entry.timestamp, "2024-01-15T10:30:00.123Z");
+        assert_eq!(entry.stream, "stdout");
+        assert_eq!(entry.message, "Hello world");
+    }
+
+    #[test]
+    fn test_parse_log_line_with_spaces() {
+        let line = "2024-01-15T10:30:00Z stderr Error: something went wrong";
+        let entry = YoukiCliRuntime::parse_log_line(line).unwrap();
+        assert_eq!(entry.timestamp, "2024-01-15T10:30:00Z");
+        assert_eq!(entry.stream, "stderr");
+        assert_eq!(entry.message, "Error: something went wrong");
+    }
+
+    #[test]
+    fn test_parse_log_line_no_stream() {
+        // Timestamp with no stream defaults to stdout
+        let line = "2024-01-15T10:30:00.123Z message-only";
+        let entry = YoukiCliRuntime::parse_log_line(line).unwrap();
+        assert_eq!(entry.timestamp, "2024-01-15T10:30:00.123Z");
+        assert_eq!(entry.stream, "stdout"); // Default to stdout
+        assert_eq!(entry.message, "message-only");
+    }
+
+    #[test]
+    fn test_parse_log_line_empty() {
+        assert!(YoukiCliRuntime::parse_log_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_log_line_bare_message() {
+        // Lines without timestamp get current time
+        let entry = YoukiCliRuntime::parse_log_line("bare message").unwrap();
+        assert_eq!(entry.stream, "stdout");
+        assert_eq!(entry.message, "bare message");
+        // Timestamp should be valid RFC3339
+        assert!(entry.timestamp.contains('T'));
     }
 }

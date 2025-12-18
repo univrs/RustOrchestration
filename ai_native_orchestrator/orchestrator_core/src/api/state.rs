@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use cluster_manager_interface::ClusterManager;
+use container_runtime_interface::ContainerRuntime;
 use orchestrator_shared_types::WorkloadDefinition;
 use state_store_interface::StateStore;
 
@@ -21,6 +22,8 @@ pub struct ApiState {
     pub workload_tx: mpsc::Sender<WorkloadDefinition>,
     /// Authentication configuration.
     pub auth_config: Arc<AuthConfig>,
+    /// Optional container runtime for log access.
+    pub container_runtime: Option<Arc<dyn ContainerRuntime>>,
 }
 
 impl ApiState {
@@ -36,6 +39,24 @@ impl ApiState {
             cluster_manager,
             workload_tx,
             auth_config: Arc::new(auth_config),
+            container_runtime: None,
+        }
+    }
+
+    /// Create new API state with container runtime for log access.
+    pub fn with_runtime(
+        state_store: Arc<dyn StateStore>,
+        cluster_manager: Arc<dyn ClusterManager>,
+        workload_tx: mpsc::Sender<WorkloadDefinition>,
+        auth_config: AuthConfig,
+        container_runtime: Arc<dyn ContainerRuntime>,
+    ) -> Self {
+        Self {
+            state_store,
+            cluster_manager,
+            workload_tx,
+            auth_config: Arc::new(auth_config),
+            container_runtime: Some(container_runtime),
         }
     }
 
@@ -46,5 +67,10 @@ impl ApiState {
         workload_tx: mpsc::Sender<WorkloadDefinition>,
     ) -> Self {
         Self::new(state_store, cluster_manager, workload_tx, AuthConfig::disabled())
+    }
+
+    /// Set the container runtime for log access.
+    pub fn set_runtime(&mut self, runtime: Arc<dyn ContainerRuntime>) {
+        self.container_runtime = Some(runtime);
     }
 }

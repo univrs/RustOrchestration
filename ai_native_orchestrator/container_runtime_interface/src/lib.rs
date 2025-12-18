@@ -17,6 +17,19 @@ pub struct ContainerStatus {
     pub error_message: Option<String>,
 }
 
+/// Options for retrieving container logs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LogOptions {
+    /// Return only the last N lines.
+    pub tail: Option<usize>,
+    /// Include timestamps in output.
+    pub timestamps: bool,
+    /// Only return logs since this timestamp (RFC3339).
+    pub since: Option<String>,
+    /// Only return logs until this timestamp (RFC3339).
+    pub until: Option<String>,
+}
+
 /// Trait for interacting with a container runtime (e.g., Youki, runc)
 #[async_trait]
 pub trait ContainerRuntime: Send + Sync {
@@ -41,6 +54,20 @@ pub trait ContainerRuntime: Send + Sync {
 
     /// Lists all containers managed by this runtime on the current node.
     async fn list_containers(&self, node_id: NodeId) -> Result<Vec<ContainerStatus>>;
+
+    /// Gets container logs.
+    /// Returns the log content as a string.
+    async fn get_container_logs(
+        &self,
+        container_id: &ContainerId,
+        options: &LogOptions,
+    ) -> Result<String> {
+        // Default implementation - logs not supported
+        let _ = (container_id, options);
+        Err(OrchestrationError::RuntimeError(
+            "Log retrieval not supported by this runtime".to_string()
+        ))
+    }
 
     // Potentially methods for pulling images, managing networks, volumes, etc.
     // async fn pull_image(&self, image_name: &str) -> Result<()>;

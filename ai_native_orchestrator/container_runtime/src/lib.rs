@@ -37,7 +37,10 @@ pub use mock::MockRuntime;
 pub use youki::YoukiRuntime;
 
 #[cfg(feature = "youki-cli")]
-pub use youki_cli::{YoukiCliRuntime, YoukiCliConfig, YoukiCliError, YoukiState, ContainerStats};
+pub use youki_cli::{
+    YoukiCliRuntime, YoukiCliConfig, YoukiCliError, YoukiState, ContainerStats,
+    LogEntry, LogOptions, LogReceiver,
+};
 
 #[cfg(test)]
 mod tests {

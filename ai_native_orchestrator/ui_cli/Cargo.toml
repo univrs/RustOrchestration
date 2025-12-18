@@ -42,6 +42,10 @@ colored = "2.1"
 tabled = "0.15"
 indicatif = "0.17"
 
+# WebSocket client for log streaming
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
 # URL handling
 url = "2.5"
 

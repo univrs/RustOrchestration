@@ -6,13 +6,14 @@ edition = "2021"
 [dependencies]
 container_runtime_interface = { path = "../container_runtime_interface" }
 orchestrator_shared_types = { path = "../orchestrator_shared_types" }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "io-util", "fs"] }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
 
 # Image pulling and extraction
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"], optional = true }
