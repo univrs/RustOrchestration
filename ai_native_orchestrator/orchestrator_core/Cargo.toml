@@ -59,9 +59,13 @@ serde = { workspace = true }
 default = []
 cluster = ["cluster_manager/chitchat-cluster", "cluster_manager"]
 runtime = ["container_runtime/mock-runtime", "container_runtime"]
+# Real container runtime using youki CLI (Linux only, requires youki binary)
+youki-runtime = ["container_runtime/youki-cli", "container_runtime"]
 observability = ["dep:observability"]
 rest-api = ["user_config", "axum", "tower", "tower-http", "sha2", "base64", "chrono", "http", "http-body-util", "bytes", "ed25519-dalek", "hex", "serde_json"]
 full = ["cluster", "runtime", "observability", "rest-api"]
+# Full with real container runtime
+full-youki = ["cluster", "youki-runtime", "observability", "rest-api"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
@@ -77,4 +81,5 @@ sha2 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-serde_json = { workspace = true } 
+serde_json = { workspace = true }
+tempfile = "3.10" 

@@ -3,6 +3,7 @@
 //! This crate provides implementations of the `ContainerRuntime` trait:
 //! - `MockRuntime`: In-memory mock for testing (default)
 //! - `YoukiRuntime`: Real container runtime using libcontainer (requires `youki-runtime` feature)
+//! - `YoukiCliRuntime`: CLI-based runtime using youki binary (requires `youki-cli` feature)
 //!
 //! Additionally, the `oci_bundle` module provides OCI bundle generation utilities
 //! that can be used by any OCI-compliant runtime.
@@ -19,6 +20,9 @@ pub mod mock;
 #[cfg(feature = "youki-runtime")]
 pub mod youki;
 
+#[cfg(feature = "youki-cli")]
+pub mod youki_cli;
+
 // Re-export common types
 pub use container_runtime_interface::{
     ContainerRuntime, ContainerStatus, CreateContainerOptions, RuntimeError,
@@ -31,6 +35,9 @@ pub use mock::MockRuntime;
 
 #[cfg(feature = "youki-runtime")]
 pub use youki::YoukiRuntime;
+
+#[cfg(feature = "youki-cli")]
+pub use youki_cli::{YoukiCliRuntime, YoukiCliConfig, YoukiCliError, YoukiState, ContainerStats};
 
 #[cfg(test)]
 mod tests {

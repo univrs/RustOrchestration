@@ -18,6 +18,10 @@
 //! - `LOG_LEVEL`: Log level (default: "info")
 //! - `LOG_JSON`: Use JSON log format (default: false)
 //! - `AUTH_DISABLED`: Disable Ed25519 request authentication (default: true for dev)
+//! - `RUNTIME_TYPE`: Container runtime type: "mock" or "youki" (default: based on feature)
+//! - `YOUKI_BINARY`: Path to youki binary (default: "youki" - searches PATH)
+//! - `BUNDLE_ROOT`: Root directory for OCI bundles (default: "/var/lib/orchestrator/bundles")
+//! - `STATE_ROOT`: Root directory for runtime state (default: "/run/orchestrator")
 //!
 //! # API Endpoints (port 9090 by default)
 //!
@@ -52,6 +56,9 @@ use cluster_manager::chitchat_manager::{ChitchatClusterConfig, ChitchatClusterMa
 use cluster_manager_interface::ClusterManager;
 use container_runtime_interface::ContainerRuntime;
 use orchestrator_core::start_orchestrator_service;
+
+#[cfg(feature = "youki-runtime")]
+use container_runtime::{YoukiCliRuntime, YoukiCliConfig};
 use orchestrator_shared_types::{
     ContainerId, ContainerConfig, Node, NodeId, NodeResources, NodeStatus,
     OrchestrationError, Result as OrchResult,
@@ -85,12 +92,28 @@ struct NodeConfig {
     log_json: bool,
     /// Disable authentication for development
     auth_disabled: bool,
+    /// Container runtime type
+    runtime_type: RuntimeType,
+    /// Path to youki binary (only used with youki runtime)
+    youki_binary: String,
+    /// Root directory for OCI bundles
+    bundle_root: String,
+    /// Root directory for runtime state
+    state_root: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum NodeRole {
     Bootstrap,
     Worker,
+}
+
+/// Runtime type selection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RuntimeType {
+    Mock,
+    #[cfg(feature = "youki-runtime")]
+    Youki,
 }
 
 impl NodeConfig {
@@ -170,6 +193,32 @@ impl NodeConfig {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(true); // Disabled by default for development
 
+        // Runtime configuration
+        let runtime_type = match std::env::var("RUNTIME_TYPE")
+            .unwrap_or_else(|_| {
+                // Default based on feature flag
+                #[cfg(feature = "youki-runtime")]
+                { "youki".to_string() }
+                #[cfg(not(feature = "youki-runtime"))]
+                { "mock".to_string() }
+            })
+            .to_lowercase()
+            .as_str()
+        {
+            #[cfg(feature = "youki-runtime")]
+            "youki" => RuntimeType::Youki,
+            _ => RuntimeType::Mock,
+        };
+
+        let youki_binary = std::env::var("YOUKI_BINARY")
+            .unwrap_or_else(|_| "youki".to_string());
+
+        let bundle_root = std::env::var("BUNDLE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/orchestrator/bundles".to_string());
+
+        let state_root = std::env::var("STATE_ROOT")
+            .unwrap_or_else(|_| "/run/orchestrator".to_string());
+
         Ok(NodeConfig {
             node_id,
             role,
@@ -184,6 +233,10 @@ impl NodeConfig {
             log_level,
             log_json,
             auth_disabled,
+            runtime_type,
+            youki_binary,
+            bundle_root,
+            state_root,
         })
     }
 }
@@ -294,6 +347,7 @@ async fn main() -> Result<()> {
         listen_addr = %config.listen_addr,
         public_addr = %config.public_addr,
         cluster_id = %config.cluster_id,
+        runtime = ?config.runtime_type,
         "Starting orchestrator node"
     );
 
@@ -342,8 +396,36 @@ async fn main() -> Result<()> {
     // Set self node info before initialization
     cluster_manager.set_self_node(self_node.clone()).await;
 
-    // Create other components
-    let runtime: Arc<dyn ContainerRuntime> = Arc::new(MockRuntime::default());
+    // Create container runtime based on configuration
+    let runtime: Arc<dyn ContainerRuntime> = match config.runtime_type {
+        RuntimeType::Mock => {
+            info!("Using mock container runtime");
+            Arc::new(MockRuntime::default())
+        }
+        #[cfg(feature = "youki-runtime")]
+        RuntimeType::Youki => {
+            info!(
+                youki_binary = %config.youki_binary,
+                bundle_root = %config.bundle_root,
+                state_root = %config.state_root,
+                "Using youki container runtime"
+            );
+            let youki_config = YoukiCliConfig {
+                youki_binary: config.youki_binary.clone().into(),
+                bundle_root: config.bundle_root.clone().into(),
+                state_root: config.state_root.clone().into(),
+                command_timeout: Duration::from_secs(30),
+                stop_timeout: Duration::from_secs(10),
+            };
+            match YoukiCliRuntime::with_config(youki_config).await {
+                Ok(runtime) => Arc::new(runtime),
+                Err(e) => {
+                    error!("Failed to initialize youki runtime: {}. Falling back to mock runtime.", e);
+                    Arc::new(MockRuntime::default())
+                }
+            }
+        }
+    };
     let scheduler = Arc::new(SimpleScheduler);
     let state_store: Arc<dyn StateStore> = Arc::new(InMemoryStateStore::new());
 

@@ -2333,6 +2333,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "state_store_interface",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tower 0.4.13",

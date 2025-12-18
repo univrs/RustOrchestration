@@ -32,7 +32,10 @@ nix = { version = "0.29", optional = true }
 default = ["mock-runtime"]
 mock-runtime = []
 image-pull = ["reqwest", "flate2", "tar", "sha2", "hex", "futures-util", "tokio-util"]
+# Uses libcontainer directly (requires root, Linux only)
 youki-runtime = ["libcontainer", "oci-spec", "nix"]
+# Uses youki CLI binary (recommended for most use cases)
+youki-cli = ["image-pull"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
