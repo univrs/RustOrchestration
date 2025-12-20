@@ -14,12 +14,16 @@
 mod tests {
     use container_runtime::{YoukiCliRuntime, YoukiCliConfig};
     use container_runtime_interface::{ContainerRuntime, CreateContainerOptions};
-    use orchestrator_shared_types::{ContainerConfig, NodeResources, PortMapping};
+    use orchestrator_shared_types::{ContainerConfig, NodeResources, PortMapping, NodeId, Keypair};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
     use uuid::Uuid;
+
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     /// Check if youki binary is available.
     async fn youki_available() -> bool {
@@ -64,7 +68,7 @@ mod tests {
             }
         };
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let workload_id = Uuid::new_v4();
 
         // Initialize node
@@ -183,7 +187,7 @@ mod tests {
             }
         };
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let workload_id = Uuid::new_v4();
 
         runtime.init_node(node_id).await

@@ -11,7 +11,7 @@ use tokio::sync::{watch, RwLock};
 use tracing::{debug, info};
 
 use cluster_manager_interface::{ClusterEvent, ClusterManager};
-use orchestrator_shared_types::{Node, NodeId, NodeResources, NodeStatus, Result};
+use orchestrator_shared_types::{Node, NodeId, NodeResources, NodeStatus, Result, Keypair};
 
 /// Mock cluster manager that simulates cluster operations in-memory.
 #[derive(Debug)]
@@ -155,12 +155,16 @@ mod tests {
         assert!(manager.is_initialized().await);
     }
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[tokio::test]
     async fn test_add_node() {
         let manager = MockClusterManager::new();
         manager.initialize().await.unwrap();
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = MockClusterManager::create_test_node(node_id, "10.0.0.1:8080");
 
         manager.add_node(node.clone()).await.unwrap();
@@ -176,7 +180,7 @@ mod tests {
         let manager = MockClusterManager::new();
         manager.initialize().await.unwrap();
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = MockClusterManager::create_test_node(node_id, "10.0.0.1:8080");
 
         manager.add_node(node).await.unwrap();
@@ -196,7 +200,7 @@ mod tests {
 
         // Add 3 nodes
         for i in 0..3 {
-            let node_id = Uuid::new_v4();
+            let node_id = generate_node_id();
             let node = MockClusterManager::create_test_node(
                 node_id,
                 &format!("10.0.0.{}:8080", i + 1),

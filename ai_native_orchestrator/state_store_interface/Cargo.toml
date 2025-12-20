@@ -10,6 +10,7 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+univrs-state = { workspace = true }
 
 # Optional: etcd backend
 etcd-client = { version = "0.13", optional = true }
@@ -22,6 +23,7 @@ uuid = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
-default = ["in-memory"]
+default = ["sqlite"]
+sqlite = []
 in-memory = ["bincode"]
 etcd = ["etcd-client"]

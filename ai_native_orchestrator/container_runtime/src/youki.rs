@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use container_runtime_interface::{ContainerRuntime, ContainerStatus, CreateContainerOptions};
 use orchestrator_shared_types::{
-    ContainerConfig, ContainerId, NodeId, OrchestrationError, Result,
+    ContainerConfig, ContainerId, NodeId, OrchestrationError, Result, Keypair,
 };
 
 // Youki/libcontainer imports
@@ -569,6 +569,10 @@ impl ContainerRuntime for YoukiRuntime {
 mod tests {
     use super::*;
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[test]
     fn test_youki_config_default() {
         let config = YoukiConfig::default();
@@ -580,7 +584,7 @@ mod tests {
     #[test]
     fn test_bundle_path() {
         let runtime = YoukiRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let container_id = "test-container";
 
         let path = runtime.bundle_path(&node_id, container_id);
@@ -591,7 +595,7 @@ mod tests {
     #[test]
     fn test_root_path() {
         let runtime = YoukiRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
 
         let path = runtime.root_path(&node_id);
         assert!(path.to_string_lossy().contains(&node_id.to_string()));

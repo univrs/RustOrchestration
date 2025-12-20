@@ -15,7 +15,7 @@ use tokio::sync::{watch, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use cluster_manager_interface::{ClusterEvent, ClusterManager, ClusterManagerError};
-use orchestrator_shared_types::{Node, NodeId, NodeResources, NodeStatus, OrchestrationError, Result};
+use orchestrator_shared_types::{Node, NodeId, NodeResources, NodeStatus, OrchestrationError, Result, Keypair};
 
 /// Key prefix for node metadata in chitchat's key-value store
 const NODE_ADDRESS_KEY: &str = "node:address";
@@ -54,7 +54,7 @@ pub struct ChitchatClusterConfig {
 impl Default for ChitchatClusterConfig {
     fn default() -> Self {
         Self {
-            node_id: uuid::Uuid::new_v4().to_string(),
+            node_id: Keypair::generate().public_key().to_string(),
             listen_addr: "0.0.0.0:7280".parse().unwrap(),
             public_addr: "127.0.0.1:7280".parse().unwrap(),
             seed_nodes: Vec::new(),
@@ -130,9 +130,9 @@ impl ChitchatClusterManager {
         *self.self_node.write().await = Some(node);
     }
 
-    /// Parse a NodeId (UUID) from a chitchat node ID string.
+    /// Parse a NodeId (Ed25519 PublicKey) from a chitchat node ID string.
     fn parse_node_id(chitchat_id: &str) -> Option<NodeId> {
-        uuid::Uuid::parse_str(chitchat_id).ok()
+        chitchat_id.parse().ok()
     }
 
     /// Parse node status from string.
@@ -479,12 +479,18 @@ impl Drop for ChitchatClusterManager {
 mod tests {
     use super::*;
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[test]
     fn test_parse_node_id() {
-        let valid_uuid = "550e8400-e29b-41d4-a716-446655440000";
-        assert!(ChitchatClusterManager::parse_node_id(valid_uuid).is_some());
+        // Generate a valid public key and convert to string
+        let node_id = generate_node_id();
+        let valid_key = node_id.to_string();
+        assert!(ChitchatClusterManager::parse_node_id(&valid_key).is_some());
 
-        let invalid = "not-a-uuid";
+        let invalid = "not-a-valid-public-key";
         assert!(ChitchatClusterManager::parse_node_id(invalid).is_none());
     }
 
@@ -510,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_build_node_from_state() {
-        let node_id = uuid::Uuid::new_v4();
+        let node_id = generate_node_id();
         let mut state = HashMap::new();
 
         state.insert(NODE_ADDRESS_KEY.to_string(), "10.0.0.1:8080".to_string());

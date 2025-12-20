@@ -1,4 +1,4 @@
-use orchestrator_shared_types::{NodeId, NodeResources};
+use orchestrator_shared_types::{NodeId, NodeResources, Keypair};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -312,9 +312,13 @@ pub trait Selector {
 mod tests {
     use super::*;
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[test]
     fn test_reservation_creation() {
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let resources = NodeResources {
             cpu_cores: 2.0,
             memory_mb: 4096,
@@ -331,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_reservation_expiration() {
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let resources = NodeResources::default();
         let timeout = Duration::from_millis(10);
 
@@ -350,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_scored_candidate_creation() {
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let score = 85.5;
 
         let candidate = ScoredCandidate::new(node_id, score);
@@ -361,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_selection_result_creation() {
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let resources = NodeResources::default();
         let reservation = Reservation::new(node_id, resources, Duration::from_secs(30));
         let score = 92.3;
@@ -399,7 +403,7 @@ mod tests {
     fn test_selection_error_variants() {
         let error1 = SelectionError::NoCandidates;
         let error2 = SelectionError::AllCandidatesFiltered("test reason".to_string());
-        let error3 = SelectionError::ReservationFailed(Uuid::new_v4(), "test".to_string());
+        let error3 = SelectionError::ReservationFailed(generate_node_id(), "test".to_string());
         let error4 =
             SelectionError::TiebreakerFailed(TiebreakerStrategy::Random, "test".to_string());
 

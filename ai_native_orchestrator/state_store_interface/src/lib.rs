@@ -123,15 +123,29 @@ pub trait StateStore: Send + Sync {
 }
 
 // Re-export implementations based on features
+#[cfg(feature = "sqlite")]
+pub mod sqlite_store;
+
 #[cfg(feature = "in-memory")]
 pub mod in_memory;
 
 #[cfg(feature = "etcd")]
 pub mod etcd_store;
 
-// Helper function to create appropriate store based on config
+// Re-export SQLite store as the default when enabled
+#[cfg(feature = "sqlite")]
+pub use sqlite_store::SqliteStateStore;
+
+// Helper function to create appropriate store based on config (sync version for non-SQLite)
 pub fn create_state_store(config: StateStoreConfig) -> Result<Arc<dyn StateStore>> {
     match config {
+        #[cfg(feature = "sqlite")]
+        StateStoreConfig::Sqlite { .. } => {
+            Err(OrchestrationError::ConfigError(
+                "SQLite store requires async initialization. Use create_state_store_async instead.".to_string()
+            ))
+        }
+
         #[cfg(feature = "in-memory")]
         StateStoreConfig::InMemory => {
             Ok(Arc::new(in_memory::InMemoryStateStore::new()))
@@ -151,9 +165,45 @@ pub fn create_state_store(config: StateStoreConfig) -> Result<Arc<dyn StateStore
     }
 }
 
+/// Async helper function to create appropriate store based on config
+/// Required for SQLite backend which needs async initialization
+pub async fn create_state_store_async(config: StateStoreConfig) -> Result<Arc<dyn StateStore>> {
+    match config {
+        #[cfg(feature = "sqlite")]
+        StateStoreConfig::Sqlite { path } => {
+            let store = sqlite_store::SqliteStateStore::open(path).await?;
+            Ok(Arc::new(store) as Arc<dyn StateStore>)
+        }
+
+        #[cfg(feature = "in-memory")]
+        StateStoreConfig::InMemory => {
+            Ok(Arc::new(in_memory::InMemoryStateStore::new()))
+        }
+
+        #[cfg(feature = "etcd")]
+        StateStoreConfig::Etcd { endpoints } => {
+            etcd_store::EtcdStateStore::new(endpoints)
+                .map(|store| Arc::new(store) as Arc<dyn StateStore>)
+        }
+
+        #[allow(unreachable_patterns)]
+        _ => Err(OrchestrationError::ConfigError(
+            "State store configuration not supported with current features".to_string()
+        )),
+    }
+}
+
 /// Configuration for state store backends
 #[derive(Debug, Clone)]
 pub enum StateStoreConfig {
+    /// SQLite backend (default, production-ready)
+    /// Uses univrs-state SqliteStore for durable persistence
+    #[cfg(feature = "sqlite")]
+    Sqlite {
+        /// Path to the SQLite database file
+        path: std::path::PathBuf,
+    },
+
     #[cfg(feature = "in-memory")]
     InMemory,
 

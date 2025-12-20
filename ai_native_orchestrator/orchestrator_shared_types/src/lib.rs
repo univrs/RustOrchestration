@@ -3,7 +3,16 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub type NodeId = Uuid;
+// Re-export univrs-identity types
+pub use univrs_identity::{Keypair, PublicKey, Signature};
+
+/// NodeId is an Ed25519 public key providing cryptographic identity.
+/// This enables:
+/// - Secure node authentication
+/// - Message signing for cluster communication
+/// - Self-sovereign identity (no central authority)
+pub type NodeId = PublicKey;
+
 pub type WorkloadId = Uuid;
 pub type ContainerId = String; // Typically a hash provided by the runtime
 

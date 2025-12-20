@@ -406,11 +406,15 @@ mod tests {
         assert!(commitment.network_allocation.is_some());
     }
 
+    fn generate_node_id() -> NodeId {
+        orchestrator_shared_types::Keypair::generate().public_key()
+    }
+
     #[test]
     fn test_bind_request_creation() {
         let request = BindRequest {
             container: "container-123".to_string(),
-            target_node: Uuid::new_v4(),
+            target_node: generate_node_id(),
             reservation_id: Uuid::new_v4(),
             binding_mode: BindingMode::Optimistic {
                 fast_commit: true,
@@ -435,7 +439,7 @@ mod tests {
     fn test_bind_event_success() {
         let event = BindEvent::BindSuccess {
             container_id: "container-456".to_string(),
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             timestamp: SystemTime::now(),
         };
 

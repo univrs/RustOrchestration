@@ -42,7 +42,7 @@ npx claude-flow@alpha swarm \
      - pub mod claims;
      - pub mod error;
   
-  4. Reference the DOL spec at ~/repos/metadol/docs/ontology/prospective/identity.dol
+  4. Reference the DOL spec at ~/repos/RustOrchestration/ontology/prospective/identity.dol
      for the contracts each module must fulfill.
   
   5. Create .gitignore for Rust project.
@@ -170,7 +170,7 @@ npx claude-flow@alpha swarm \
   
   4. Create migrations/ directory for SQLite schema.
   
-  5. Reference the DOL spec at ~/repos/metadol/docs/ontology/prospective/storage.dol
+  5. Reference the DOL spec at ~/repos/RustOrchestration/ontology/prospective/storage.dol
   
   LIST ALL CREATED FILES with full paths." \
   --claude

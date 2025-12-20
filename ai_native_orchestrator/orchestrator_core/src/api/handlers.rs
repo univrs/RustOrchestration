@@ -17,7 +17,7 @@ use uuid::Uuid;
 use container_runtime_interface::LogOptions as RuntimeLogOptions;
 
 use orchestrator_shared_types::{
-    ContainerConfig, Node, NodeResources, NodeStatus, PortMapping,
+    ContainerConfig, Node, NodeId, NodeResources, NodeStatus, PortMapping,
     WorkloadDefinition, WorkloadInstance, WorkloadInstanceStatus,
 };
 
@@ -126,7 +126,7 @@ pub struct ListResponse<T> {
 /// Node response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeResponse {
-    pub id: Uuid,
+    pub id: String,
     pub address: String,
     pub status: String,
     pub labels: HashMap<String, String>,
@@ -139,7 +139,7 @@ pub struct NodeResponse {
 pub struct InstanceResponse {
     pub id: Uuid,
     pub workload_id: Uuid,
-    pub node_id: Uuid,
+    pub node_id: String,
     pub container_ids: Vec<String>,
     pub status: String,
 }
@@ -289,7 +289,7 @@ impl From<NodeResources> for ResourceRequestsResponse {
 impl From<Node> for NodeResponse {
     fn from(node: Node) -> Self {
         NodeResponse {
-            id: node.id,
+            id: node.id.to_string(),
             address: node.address,
             status: format!("{:?}", node.status),
             labels: node.labels,
@@ -304,7 +304,7 @@ impl From<WorkloadInstance> for InstanceResponse {
         InstanceResponse {
             id: inst.id,
             workload_id: inst.workload_id,
-            node_id: inst.node_id,
+            node_id: inst.node_id.to_string(),
             container_ids: inst.container_ids,
             status: format!("{:?}", inst.status),
         }
@@ -514,14 +514,17 @@ pub async fn list_nodes(
 /// Get a node by ID.
 pub async fn get_node(
     State(state): State<ApiState>,
-    Path(node_id): Path<Uuid>,
+    Path(node_id_str): Path<String>,
 ) -> ApiResult<impl IntoResponse> {
+    let node_id: NodeId = node_id_str.parse()
+        .map_err(|_| ApiError::validation_error(&format!("Invalid node ID: {}", node_id_str)))?;
+
     let node = state
         .state_store
         .get_node(&node_id)
         .await
         .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("Node", &node_id.to_string()))?;
+        .ok_or_else(|| ApiError::not_found("Node", &node_id_str))?;
 
     let response: NodeResponse = node.into();
     Ok(Json(response))
@@ -892,6 +895,11 @@ async fn handle_log_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orchestrator_shared_types::Keypair;
+
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     #[test]
     fn test_create_workload_request_conversion() {
@@ -927,8 +935,9 @@ mod tests {
 
     #[test]
     fn test_node_response_conversion() {
+        let node_id = generate_node_id();
         let node = Node {
-            id: Uuid::new_v4(),
+            id: node_id,
             address: "10.0.0.1:8080".to_string(),
             status: NodeStatus::Ready,
             labels: HashMap::new(),
@@ -945,7 +954,7 @@ mod tests {
         };
 
         let response: NodeResponse = node.clone().into();
-        assert_eq!(response.id, node.id);
+        assert_eq!(response.id, node.id.to_string());
         assert_eq!(response.status, "Ready");
         assert_eq!(response.resources_capacity.cpu_cores, 4.0);
     }
@@ -955,7 +964,7 @@ mod tests {
         let instance = WorkloadInstance {
             id: Uuid::new_v4(),
             workload_id: Uuid::new_v4(),
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             container_ids: vec!["container-1".to_string()],
             status: WorkloadInstanceStatus::Running,
         };

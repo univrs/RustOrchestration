@@ -22,7 +22,7 @@ use container_runtime_interface::{ContainerRuntime, ContainerStatus, CreateConta
 use orchestrator_core::start_orchestrator_service;
 use orchestrator_shared_types::{
     ContainerConfig, ContainerId, Node, NodeId, NodeResources, NodeStatus,
-    OrchestrationError, Result as OrchResult, WorkloadDefinition, PortMapping,
+    OrchestrationError, Result as OrchResult, WorkloadDefinition, PortMapping, Keypair,
 };
 use scheduler_interface::SimpleScheduler;
 use state_store_interface::in_memory::InMemoryStateStore;
@@ -209,10 +209,17 @@ impl ClusterManager for MockClusterManager {
 // Test Helpers
 // ============================================================================
 
+fn generate_node_id() -> NodeId {
+    Keypair::generate().public_key()
+}
+
 fn create_test_node(id: NodeId, status: NodeStatus) -> Node {
+    // Use a hash of the public key bytes to generate a deterministic address suffix
+    let key_str = id.to_string();
+    let addr_suffix = key_str.as_bytes().iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
     Node {
         id,
-        address: format!("10.0.0.{}:8080", id.as_u128() % 256),
+        address: format!("10.0.0.{}:8080", addr_suffix),
         status,
         labels: HashMap::new(),
         resources_capacity: NodeResources {
@@ -291,7 +298,7 @@ impl TestHarness {
     }
 
     async fn add_ready_node(&self) -> NodeId {
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = create_test_node(node_id, NodeStatus::Ready);
         self.cluster_manager.add_node(node).await;
 
@@ -542,7 +549,7 @@ async fn test_node_status_not_ready_ignored() {
     let harness = TestHarness::new().await;
 
     // Add a NotReady node
-    let node_id = Uuid::new_v4();
+    let node_id = generate_node_id();
     let node = create_test_node(node_id, NodeStatus::NotReady);
     harness.cluster_manager.add_node(node).await;
     tokio::time::sleep(Duration::from_millis(50)).await;

@@ -504,12 +504,15 @@ impl Filter for ResourceFeasibilityChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orchestrator_shared_types::{NodeResources, NodeStatus};
-    use uuid::Uuid;
+    use orchestrator_shared_types::{NodeResources, NodeStatus, Keypair};
+
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     fn create_test_node(cpu: f32, memory: u64, disk: u64) -> Node {
         Node {
-            id: Uuid::new_v4(),
+            id: generate_node_id(),
             address: "127.0.0.1:8080".to_string(),
             status: NodeStatus::Ready,
             labels: HashMap::new(),

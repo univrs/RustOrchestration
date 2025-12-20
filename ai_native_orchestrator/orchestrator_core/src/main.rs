@@ -3,9 +3,9 @@ use std::sync::Arc;
 use tokio;
 
 use orchestrator_core::start_orchestrator_service;
-use orchestrator_shared_types::{NodeId, WorkloadDefinition, ContainerConfig, NodeResources, PortMapping, Node, Result as OrchestrationResult, OrchestrationError, ContainerId};
+use orchestrator_shared_types::{NodeId, WorkloadDefinition, ContainerConfig, NodeResources, PortMapping, Node, Result as OrchestrationResult, OrchestrationError, ContainerId, Keypair};
 use scheduler_interface::SimpleScheduler;
-use state_store_interface::{StateStore, in_memory::InMemoryStateStore};
+use state_store_interface::{StateStore, SqliteStateStore};
 use uuid::Uuid;
 use std::collections::HashMap;
 
@@ -132,8 +132,11 @@ async fn main() -> anyhow::Result<()> {
 
     let scheduler = Arc::new(SimpleScheduler);
 
-    // Initialize persistent state store (in-memory for development/testing)
-    let state_store: Arc<dyn StateStore> = Arc::new(InMemoryStateStore::new());
+    // Initialize persistent state store (SQLite for development/testing)
+    let state_store: Arc<dyn StateStore> = Arc::new(
+        SqliteStateStore::in_memory().await
+            .expect("Failed to create in-memory SQLite store")
+    );
 
     let workload_tx = start_orchestrator_service(
         state_store,
@@ -149,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
         let mock_cm_for_spawn = mock_cluster_manager_concrete.clone(); // Clone the Arc<MockClusterManager>
         async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            let node1_id = Uuid::new_v4();
+            let node1_id = Keypair::generate().public_key();
             let node1 = Node {
                 id: node1_id,
                 address: "10.0.0.1:1234".to_string(),
@@ -168,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
     let cm_trait_for_downcast: Arc<dyn ClusterManager> = mock_cluster_manager_concrete.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await; // Add another node later
-        let node2_id = Uuid::new_v4();
+        let node2_id = Keypair::generate().public_key();
         let node2 = Node {
             id: node2_id,
             address: "10.0.0.2:1234".to_string(),

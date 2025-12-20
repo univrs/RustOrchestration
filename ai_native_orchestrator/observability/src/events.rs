@@ -36,7 +36,7 @@ use orchestrator_shared_types::{
 };
 
 #[cfg(test)]
-use orchestrator_shared_types::NodeStatus;
+use orchestrator_shared_types::{NodeStatus, Keypair};
 
 /// Event topics that clients can subscribe to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn test_node_event_data_from_node() {
         let node = Node {
-            id: Uuid::new_v4(),
+            id: Keypair::generate().public_key(),
             address: "10.0.0.1:8080".to_string(),
             status: NodeStatus::Ready,
             labels: HashMap::from([("zone".to_string(), "us-east-1".to_string())]),

@@ -150,15 +150,19 @@ impl StateStore for InMemoryStateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orchestrator_shared_types::{NodeStatus, NodeResources, WorkloadInstanceStatus};
+    use orchestrator_shared_types::{NodeStatus, NodeResources, WorkloadInstanceStatus, Keypair};
     use std::collections::HashMap;
     use uuid::Uuid;
+
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     #[tokio::test]
     async fn test_node_operations() {
         let store = InMemoryStateStore::new();
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = Node {
             id: node_id,
             address: "10.0.0.1:8080".to_string(),
@@ -233,7 +237,7 @@ mod tests {
         let instance = WorkloadInstance {
             id: Uuid::new_v4(),
             workload_id,
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             container_ids: vec!["container-123".to_string()],
             status: WorkloadInstanceStatus::Running,
         };
@@ -287,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_nonexistent_node() {
         let store = InMemoryStateStore::new();
-        let nonexistent_id = Uuid::new_v4();
+        let nonexistent_id = generate_node_id();
 
         let result = store.get_node(&nonexistent_id).await.unwrap();
         assert!(result.is_none());
@@ -314,7 +318,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_nonexistent_node() {
         let store = InMemoryStateStore::new();
-        let nonexistent_id = Uuid::new_v4();
+        let nonexistent_id = generate_node_id();
 
         // Should not error when deleting non-existent
         assert!(store.delete_node(&nonexistent_id).await.is_ok());
@@ -349,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_update_overwrites() {
         let store = InMemoryStateStore::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
 
         let node_v1 = Node {
             id: node_id,
@@ -420,7 +424,7 @@ mod tests {
         let instance_v1 = WorkloadInstance {
             id: instance_id,
             workload_id,
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             container_ids: vec!["container-1".to_string()],
             status: WorkloadInstanceStatus::Pending,
         };
@@ -428,7 +432,7 @@ mod tests {
         let instance_v2 = WorkloadInstance {
             id: instance_id,
             workload_id,
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             container_ids: vec!["container-2".to_string(), "container-3".to_string()],
             status: WorkloadInstanceStatus::Running,
         };
@@ -450,7 +454,7 @@ mod tests {
 
         for i in 0..5 {
             let node = Node {
-                id: Uuid::new_v4(),
+                id: generate_node_id(),
                 address: format!("10.0.0.{}:8080", i),
                 status: NodeStatus::Ready,
                 labels: HashMap::new(),
@@ -495,7 +499,7 @@ mod tests {
             let instance = WorkloadInstance {
                 id: Uuid::new_v4(),
                 workload_id: workload_1_id,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec!["c1".to_string()],
                 status: WorkloadInstanceStatus::Running,
             };
@@ -507,7 +511,7 @@ mod tests {
             let instance = WorkloadInstance {
                 id: Uuid::new_v4(),
                 workload_id: workload_2_id,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec!["c2".to_string()],
                 status: WorkloadInstanceStatus::Pending,
             };
@@ -539,7 +543,7 @@ mod tests {
             .map(|i| WorkloadInstance {
                 id: Uuid::new_v4(),
                 workload_id,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec![format!("container-{}", i)],
                 status: WorkloadInstanceStatus::Running,
             })
@@ -581,7 +585,7 @@ mod tests {
             store.put_instance(WorkloadInstance {
                 id: Uuid::new_v4(),
                 workload_id: workload_to_delete,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec![],
                 status: WorkloadInstanceStatus::Running,
             }).await.unwrap();
@@ -591,7 +595,7 @@ mod tests {
             store.put_instance(WorkloadInstance {
                 id: Uuid::new_v4(),
                 workload_id: workload_to_keep,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec![],
                 status: WorkloadInstanceStatus::Running,
             }).await.unwrap();
@@ -623,7 +627,7 @@ mod tests {
         // Pre-populate with data
         for i in 0..10 {
             store.put_node(Node {
-                id: Uuid::new_v4(),
+                id: generate_node_id(),
                 address: format!("10.0.0.{}:8080", i),
                 status: NodeStatus::Ready,
                 labels: HashMap::new(),
@@ -665,7 +669,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for _ in 0..10 {
                     let node = Node {
-                        id: Uuid::new_v4(),
+                        id: Keypair::generate().public_key(),
                         address: "10.0.0.1:8080".to_string(),
                         status: NodeStatus::Ready,
                         labels: HashMap::new(),
@@ -697,7 +701,7 @@ mod tests {
         let store = Arc::new(InMemoryStateStore::new());
 
         // Pre-populate
-        let initial_node_id = Uuid::new_v4();
+        let initial_node_id = Keypair::generate().public_key();
         store.put_node(Node {
             id: initial_node_id,
             address: "initial".to_string(),
@@ -727,7 +731,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for _ in 0..20 {
                     store_clone.put_node(Node {
-                        id: Uuid::new_v4(),
+                        id: Keypair::generate().public_key(),
                         address: "new".to_string(),
                         status: NodeStatus::Ready,
                         labels: HashMap::new(),
@@ -759,7 +763,7 @@ mod tests {
         labels.insert("tier".to_string(), "compute".to_string());
 
         let node = Node {
-            id: Uuid::new_v4(),
+            id: generate_node_id(),
             address: "10.0.0.1:8080".to_string(),
             status: NodeStatus::Ready,
             labels: labels.clone(),
@@ -793,7 +797,7 @@ mod tests {
             let instance = WorkloadInstance {
                 id: instance_id,
                 workload_id,
-                node_id: Uuid::new_v4(),
+                node_id: generate_node_id(),
                 container_ids: vec!["container-1".to_string()],
                 status: status.clone(),
             };
@@ -817,7 +821,7 @@ mod tests {
         store.put_instance(WorkloadInstance {
             id: Uuid::new_v4(),
             workload_id: Uuid::new_v4(), // Different workload
-            node_id: Uuid::new_v4(),
+            node_id: generate_node_id(),
             container_ids: vec![],
             status: WorkloadInstanceStatus::Running,
         }).await.unwrap();

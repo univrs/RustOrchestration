@@ -14,7 +14,7 @@ use uuid::Uuid;
 use container_runtime_interface::{
     ContainerRuntime, ContainerStatus, CreateContainerOptions,
 };
-use orchestrator_shared_types::{ContainerConfig, ContainerId, NodeId, Result};
+use orchestrator_shared_types::{ContainerConfig, ContainerId, NodeId, Result, Keypair};
 
 /// Mock container state
 #[derive(Debug, Clone)]
@@ -203,10 +203,14 @@ mod tests {
         }
     }
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[tokio::test]
     async fn test_init_node() {
         let runtime = MockRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
 
         assert!(!runtime.is_node_initialized(&node_id).await);
         runtime.init_node(node_id).await.unwrap();
@@ -216,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_container() {
         let runtime = MockRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let workload_id = Uuid::new_v4();
 
         runtime.init_node(node_id).await.unwrap();
@@ -235,7 +239,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_and_remove_container() {
         let runtime = MockRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let workload_id = Uuid::new_v4();
 
         runtime.init_node(node_id).await.unwrap();
@@ -262,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_containers() {
         let runtime = MockRuntime::new();
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let workload_id = Uuid::new_v4();
 
         runtime.init_node(node_id).await.unwrap();

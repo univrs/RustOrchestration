@@ -33,7 +33,7 @@
 //! After scoring, nodes are sorted in descending order by final_score, and the
 //! scheduler selects the highest-scoring node for placement.
 
-use orchestrator_shared_types::{Node, NodeId, WorkloadDefinition};
+use orchestrator_shared_types::{Node, NodeId, WorkloadDefinition, Keypair};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -512,6 +512,10 @@ pub trait Scorer: Send + Sync {
 mod tests {
     use super::*;
 
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
+
     #[test]
     fn test_scoring_function_normalized_score() {
         let resource_balance = ScoringFunction::ResourceBalance {
@@ -531,7 +535,7 @@ mod tests {
 
     #[test]
     fn test_node_score_creation() {
-        let node_id = NodeId::new_v4();
+        let node_id = generate_node_id();
         let score = NodeScore::new(node_id, 85, 2.0);
         assert_eq!(score.node_id, node_id);
         assert_eq!(score.normalized_value, 85);
@@ -541,9 +545,9 @@ mod tests {
 
     #[test]
     fn test_scoring_result_ordering() {
-        let node1 = NodeId::new_v4();
-        let node2 = NodeId::new_v4();
-        let node3 = NodeId::new_v4();
+        let node1 = generate_node_id();
+        let node2 = generate_node_id();
+        let node3 = generate_node_id();
 
         let scores = vec![
             NodeScore::new(node1, 75, 1.0),
@@ -600,7 +604,7 @@ mod tests {
             labels: HashMap::new(),
         });
 
-        let node_id = NodeId::new_v4();
+        let node_id = generate_node_id();
         let allocations = NodeAllocations::new();
         let topology = TopologyInfo::new("node1".to_string())
             .with_zone("us-east-1a".to_string())
