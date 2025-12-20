@@ -1,14 +1,22 @@
 use async_trait::async_trait;
-use orchestrator_shared_types::{Node, NodeId, OrchestrationError, Result, WorkloadDefinition, WorkloadInstance};
- // To get node information
+use orchestrator_shared_types::{
+    Node, NodeId, OrchestrationError, Result, WorkloadDefinition, WorkloadInstance,
+};
+// To get node information
 use std::sync::Arc;
+
+pub mod bind;
+pub mod filter;
+pub mod resources;
+pub mod score;
+pub mod select;
 
 /// Input for a scheduling decision.
 #[derive(Debug, Clone)]
 pub struct ScheduleRequest {
     pub workload_definition: Arc<WorkloadDefinition>,
     pub current_instances: Vec<WorkloadInstance>, // Existing instances of this workload
-    // Potentially other constraints like anti-affinity, taints/tolerations
+                                                  // Potentially other constraints like anti-affinity, taints/tolerations
 }
 
 /// Output of a scheduling decision.
@@ -65,7 +73,10 @@ impl Scheduler for SimpleScheduler {
         available_nodes: &[Node],
     ) -> Result<Vec<ScheduleDecision>> {
         let mut decisions = Vec::new();
-        let needed_replicas = request.workload_definition.replicas.saturating_sub(request.current_instances.len() as u32);
+        let needed_replicas = request
+            .workload_definition
+            .replicas
+            .saturating_sub(request.current_instances.len() as u32);
 
         if needed_replicas == 0 {
             return Ok(decisions);
@@ -73,7 +84,9 @@ impl Scheduler for SimpleScheduler {
 
         if available_nodes.is_empty() {
             for _ in 0..needed_replicas {
-                decisions.push(ScheduleDecision::NoPlacement("No nodes available".to_string()));
+                decisions.push(ScheduleDecision::NoPlacement(
+                    "No nodes available".to_string(),
+                ));
             }
             return Ok(decisions);
         }
@@ -90,7 +103,9 @@ impl Scheduler for SimpleScheduler {
             } else {
                 // This case should not be hit if available_nodes is not empty due to cycle()
                 // but as a safeguard:
-                decisions.push(ScheduleDecision::NoPlacement("Failed to pick a node (internal error)".to_string()));
+                decisions.push(ScheduleDecision::NoPlacement(
+                    "Failed to pick a node (internal error)".to_string(),
+                ));
             }
         }
         Ok(decisions)

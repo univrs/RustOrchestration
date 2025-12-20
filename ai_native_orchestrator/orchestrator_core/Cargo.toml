@@ -46,7 +46,6 @@ http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1.5", optional = true }
 ed25519-dalek = { version = "2.1", features = ["rand_core"], optional = true }
 hex = { version = "0.4", optional = true }
-serde_json = { workspace = true, optional = true }
 
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -57,6 +56,7 @@ async-trait = { workspace = true }
 anyhow = { workspace = true }
 downcast-rs = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = []
@@ -65,7 +65,7 @@ runtime = ["container_runtime/mock-runtime", "container_runtime"]
 # Real container runtime using youki CLI (Linux only, requires youki binary)
 youki-runtime = ["container_runtime/youki-cli", "container_runtime"]
 observability = ["dep:observability"]
-rest-api = ["user_config", "axum", "tower", "tower-http", "sha2", "base64", "chrono", "http", "http-body-util", "bytes", "ed25519-dalek", "hex", "serde_json"]
+rest-api = ["user_config", "axum", "tower", "tower-http", "sha2", "base64", "chrono", "http", "http-body-util", "bytes", "ed25519-dalek", "hex"]
 mcp = ["mcp_server"]
 full = ["cluster", "runtime", "observability", "rest-api", "mcp"]
 # Full with real container runtime

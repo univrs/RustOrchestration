@@ -3251,8 +3251,10 @@ dependencies = [
  "async-trait",
  "cluster_manager_interface",
  "orchestrator_shared_types",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

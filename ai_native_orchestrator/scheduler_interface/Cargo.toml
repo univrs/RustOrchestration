@@ -9,3 +9,5 @@ cluster_manager_interface = { path = "../cluster_manager_interface" } # Schedule
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
