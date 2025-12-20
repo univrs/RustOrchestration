@@ -3,9 +3,9 @@
 // Implementation: univrs-identity crate
 
 system univrs.identity @ 0.1.0 {
-  requires cryptography.ed25519
-  requires encoding.base58
-  requires storage.encrypted
+  requires cryptography.ed25519 >= 0.0.1
+  requires encoding.base58 >= 0.0.1
+  requires storage.encrypted >= 0.0.1
   
   provides self_sovereign_identity
   provides signature_verification

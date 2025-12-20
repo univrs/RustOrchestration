@@ -86,4 +86,8 @@ hex = "0.4"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = { workspace = true }
-tempfile = "3.10" 
+tempfile = "3.10"
+state_store_interface = { path = "../state_store_interface", features = ["in-memory"] }
+container_runtime_interface = { path = "../container_runtime_interface" }
+cluster_manager_interface = { path = "../cluster_manager_interface" }
+scheduler_interface = { path = "../scheduler_interface" }

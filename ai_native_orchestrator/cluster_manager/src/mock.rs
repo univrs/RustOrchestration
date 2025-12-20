@@ -217,7 +217,7 @@ mod tests {
         let manager = MockClusterManager::new();
         manager.initialize().await.unwrap();
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = MockClusterManager::create_test_node(node_id, "10.0.0.1:8080");
 
         manager.add_node(node).await.unwrap();
@@ -239,7 +239,7 @@ mod tests {
 
         let mut event_rx = manager.subscribe_to_events().await.unwrap();
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = MockClusterManager::create_test_node(node_id, "10.0.0.1:8080");
 
         // Add node
@@ -263,7 +263,7 @@ mod tests {
         let manager = MockClusterManager::new();
         manager.initialize().await.unwrap();
 
-        let nonexistent_id = Uuid::new_v4();
+        let nonexistent_id = generate_node_id();
         let result = manager.get_node(&nonexistent_id).await.unwrap();
         assert!(result.is_none());
     }

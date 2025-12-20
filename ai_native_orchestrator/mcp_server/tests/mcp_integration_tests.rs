@@ -18,13 +18,18 @@ mod mock {
     use cluster_manager_interface::{ClusterEvent, ClusterManager};
     use orchestrator_shared_types::{
         Node, NodeId, NodeResources, NodeStatus, Result, WorkloadDefinition,
-        WorkloadInstance, WorkloadId,
+        WorkloadInstance, WorkloadId, Keypair,
     };
     use scheduler_interface::{ScheduleDecision, ScheduleRequest, Scheduler};
     use state_store_interface::StateStore;
     use tokio::sync::{watch, mpsc};
     use uuid::Uuid;
     use std::collections::HashMap;
+
+    /// Generate a new NodeId for testing (Ed25519 public key).
+    pub fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     /// Mock cluster manager for testing.
     #[derive(Clone, Default)]
@@ -183,7 +188,7 @@ mod mock {
     }
 
     /// Create a test node.
-    pub fn create_test_node(id: Uuid, address: &str) -> Node {
+    pub fn create_test_node(id: NodeId, address: &str) -> Node {
         Node {
             id,
             address: address.to_string(),
@@ -381,7 +386,7 @@ async fn test_tools_call_list_workloads() {
 
 #[tokio::test]
 async fn test_tools_call_list_nodes() {
-    let node = mock::create_test_node(uuid::Uuid::new_v4(), "192.168.1.1:8080");
+    let node = mock::create_test_node(mock::generate_node_id(), "192.168.1.1:8080");
     let server = create_server_with_data(vec![node.clone()], vec![]);
 
     let request = make_request("tools/call", json!({
@@ -398,7 +403,7 @@ async fn test_tools_call_list_nodes() {
 
 #[tokio::test]
 async fn test_tools_call_get_cluster_status() {
-    let node = mock::create_test_node(uuid::Uuid::new_v4(), "192.168.1.1:8080");
+    let node = mock::create_test_node(mock::generate_node_id(), "192.168.1.1:8080");
     let workload = mock::create_test_workload("test-workload");
     let server = create_server_with_data(vec![node], vec![workload]);
 
@@ -489,7 +494,7 @@ async fn test_resources_list() {
 
 #[tokio::test]
 async fn test_resources_read_nodes() {
-    let node = mock::create_test_node(uuid::Uuid::new_v4(), "192.168.1.1:8080");
+    let node = mock::create_test_node(mock::generate_node_id(), "192.168.1.1:8080");
     let server = create_server_with_data(vec![node.clone()], vec![]);
 
     let request = make_request("resources/read", json!({
@@ -631,7 +636,7 @@ async fn test_null_request_id() {
 
 #[tokio::test]
 async fn test_full_mcp_flow() {
-    let node = mock::create_test_node(uuid::Uuid::new_v4(), "192.168.1.1:8080");
+    let node = mock::create_test_node(mock::generate_node_id(), "192.168.1.1:8080");
     let workload = mock::create_test_workload("nginx");
     let server = create_server_with_data(vec![node], vec![workload]);
 

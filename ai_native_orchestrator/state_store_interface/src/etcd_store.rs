@@ -280,12 +280,16 @@ impl StateStore for EtcdStateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orchestrator_shared_types::{NodeStatus, NodeResources, WorkloadInstanceStatus};
+    use orchestrator_shared_types::{NodeStatus, NodeResources, WorkloadInstanceStatus, Keypair};
     use std::collections::HashMap;
     use uuid::Uuid;
 
     // Note: These tests require a running etcd instance
     // Run with: docker run -d -p 2379:2379 --name etcd quay.io/coreos/etcd:latest
+
+    fn generate_node_id() -> NodeId {
+        Keypair::generate().public_key()
+    }
 
     async fn create_test_store() -> EtcdStateStore {
         EtcdStateStore::with_prefix(
@@ -301,7 +305,7 @@ mod tests {
     async fn test_etcd_node_operations() {
         let store = create_test_store().await;
 
-        let node_id = Uuid::new_v4();
+        let node_id = generate_node_id();
         let node = Node {
             id: node_id,
             address: "10.0.0.1:8080".to_string(),

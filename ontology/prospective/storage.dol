@@ -3,9 +3,9 @@
 // Implementation: univrs-state crate
 
 system univrs.storage @ 0.1.0 {
-  requires persistence.durable
-  requires concurrency.safe
-  requires encoding.serde
+  requires persistence.durable >= 0.0.1
+  requires concurrency.safe >= 0.0.1
+  requires encoding.serde >= 0.0.1
   
   provides key_value_storage
   provides transaction_support
